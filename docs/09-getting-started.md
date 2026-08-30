@@ -1,11 +1,11 @@
 # Getting Started
 
-This guide sets up a single-node Legion instance for local development, then extends to a 3-node cluster.
+This guide sets up a single-node Legion instance for local development, then extends to a 3-node cluster. Right now this is the best documentation `piclaw` can do, and will eventually be split into better sections.
 
 ## Prerequisites
 
 - Rust 1.95+ (stable; legion uses edition 2024)
-- Bun 1.2+ (for Bun function authoring and the client CLI)
+- Bun 1.4+ (for Bun function authoring and the client CLI)
 - A recent Linux or macOS system
 - `plan9port` (optional, for native 9P client): `brew install plan9port` or `apt install plan9-tools`
 
