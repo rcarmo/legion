@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use anyhow::Result;
 
 use legion_cluster::node::NodeConfig;
+use legion_runtime::InvocationLimits;
 
 /// Hiqlite (Raft) peer descriptor — for multi-node distributed store.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +40,9 @@ pub struct ServerConfig {
     pub raft_secret: String,
     #[serde(default)]
     pub raft_api_secret: String,
+    /// Shared limits applied to direct and agent-issued function invocations.
+    #[serde(default)]
+    pub invocation: InvocationLimits,
 }
 
 fn default_raft_node_id() -> u64 { 1 }

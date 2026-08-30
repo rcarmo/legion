@@ -19,7 +19,9 @@ fi
 
 # ── Start server ──────────────────────────────────────────────────────────────
 echo "==> Starting legion on :$PORT  data=$DATA_DIR"
-LEGION_API_PORT="$PORT" LEGION_DATA_DIR="$DATA_DIR" RUST_LOG=error "$BINARY" &
+LEGION_API_PORT="$PORT" LEGION_DATA_DIR="$DATA_DIR" \
+LEGION_INVOKE_TIMEOUT_MS=100 LEGION_INVOKE_MAX_INPUT_BYTES=1024 \
+RUST_LOG=error "$BINARY" &
 SERVER_PID=$!
 
 cleanup() {
@@ -103,8 +105,36 @@ R=$(curl -sf -X POST "http://localhost:$PORT/functions/add/invoke" \
   -d '{"a":3,"b":4}')
 echo "$R" | grep -q '"sum":7' && ok "invoke add" || fail "invoke add" "$R"
 
-# ── Test 8: create session (model irrelevant — just checks persistence) ────────
-echo "--- Test 8: POST /sessions"
+# ── Test 8: invocation limits and metrics ─────────────────────────────────────
+echo "--- Test 8: invocation limits and metrics"
+R=$(curl -sf -X POST "http://localhost:$PORT/functions" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name":    "slow",
+    "runtime": "bun",
+    "code":    "await Bun.sleep(500); process.stdout.write(JSON.stringify({ok:true}))"
+  }')
+echo "$R" | grep -q '"name":"slow"' || fail "deploy slow" "$R"
+
+HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+  "http://localhost:$PORT/functions/slow/invoke" \
+  -H "Content-Type: application/json" -d '{}')
+[[ "$HTTP" = 504 ]] && ok "invoke timeout returns 504" || fail "invoke timeout" "got $HTTP"
+
+LARGE=$(printf '%1100s' x)
+HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+  "http://localhost:$PORT/functions/add/invoke" \
+  -H "Content-Type: application/json" -d "{\"value\":\"$LARGE\"}")
+[[ "$HTTP" = 413 ]] && ok "oversized invoke returns 413" || fail "invoke input limit" "got $HTTP"
+
+R=$(curl -sf "http://localhost:$PORT/metrics")
+echo "$R" | grep -q 'legion_function_invocations_total{function="hello",runtime="bun",outcome="success"} 2' \
+  && ok "function metrics" || fail "function metrics" "$R"
+echo "$R" | grep -q 'legion_function_invocations_total{function="slow",runtime="bun",outcome="timeout"} 1' \
+  && ok "timeout metrics" || fail "timeout metrics" "$R"
+
+# ── Test 9: create session (model irrelevant — just checks persistence) ────────
+echo "--- Test 9: POST /sessions"
 MODEL="${LEGION_TEST_MODEL:-anthropic/claude-haiku-3-5}"
 R=$(curl -sf -X POST "http://localhost:$PORT/sessions" \
   -H "Content-Type: application/json" \
@@ -117,16 +147,16 @@ else
   SESSION_ID=""
 fi
 
-# ── Test 9: GET /sessions/:id ──────────────────────────────────────────────────
+# ── Test 10: GET /sessions/:id ──────────────────────────────────────────────────
 if [[ -n "$SESSION_ID" ]]; then
-  echo "--- Test 9: GET /sessions/$SESSION_ID"
+  echo "--- Test 10: GET /sessions/$SESSION_ID"
   R=$(curl -sf "http://localhost:$PORT/sessions/$SESSION_ID")
   echo "$R" | grep -q '"id"' && ok "get session" || fail "get session" "$R"
 fi
 
-# ── Test 10: GET /sessions/:id/log ────────────────────────────────────────────
+# ── Test 11: GET /sessions/:id/log ────────────────────────────────────────────
 if [[ -n "$SESSION_ID" ]]; then
-  echo "--- Test 10: GET /sessions/$SESSION_ID/log"
+  echo "--- Test 11: GET /sessions/$SESSION_ID/log"
   R=$(curl -sf "http://localhost:$PORT/sessions/$SESSION_ID/log")
   echo "$R" | grep -q '\[' && ok "get log" || fail "get log" "$R"
 fi
@@ -136,7 +166,7 @@ if [[ -z "${ANTHROPIC_API_KEY:-}" ]] && [[ -z "${OPENAI_API_KEY:-}" ]]; then
   echo ""
   echo "--- Skipping stream test (no API key set)"
 else
-  echo "--- Test 11: POST /sessions/:id/messages + GET /sessions/:id/stream"
+  echo "--- Test 12: POST /sessions/:id/messages + GET /sessions/:id/stream"
   if [[ -n "$SESSION_ID" ]]; then
     # Send user message
     curl -sf -X POST "http://localhost:$PORT/sessions/$SESSION_ID/messages" \

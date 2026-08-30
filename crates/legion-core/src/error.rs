@@ -37,6 +37,20 @@ pub enum LegionError {
     #[error("budget exceeded: {0}")]
     BudgetExceeded(String),
 
+    #[error("invocation limit exceeded for {function}: {field} ({actual} > {limit})")]
+    InvocationLimitExceeded {
+        function: String,
+        field: &'static str,
+        actual: usize,
+        limit: usize,
+    },
+
+    #[error("function {0} has reached its concurrency limit")]
+    InvocationBusy(String),
+
+    #[error("function {function} timed out after {timeout_ms} ms")]
+    InvocationTimeout { function: String, timeout_ms: u64 },
+
     #[error("LLM error: {0}")]
     LLMError(String),
 

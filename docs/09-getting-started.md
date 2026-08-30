@@ -183,6 +183,7 @@ GET    /functions                      # list functions
 POST   /functions                      # deploy Bun source or base64 WASM
 DELETE /functions/{name}
 POST   /functions/{name}/invoke
+GET    /metrics                        # Prometheus text metrics
 ```
 
 ## Useful Commands
@@ -202,6 +203,22 @@ legion deploy list       # list functions
 legion deploy delete     # remove a function
 legion call <name>       # invoke function (stdin/stdout)
 ```
+
+### Invocation limits
+
+Bun and WASM functions share the same limits whether called through REST or by an agent. Configure them in `legion.toml`:
+
+```toml
+[invocation]
+timeout_ms = 30000
+max_input_bytes = 1048576
+max_output_bytes = 4194304
+max_concurrent_per_function = 8
+```
+
+The equivalent environment overrides are `LEGION_INVOKE_TIMEOUT_MS`, `LEGION_INVOKE_MAX_INPUT_BYTES`, `LEGION_INVOKE_MAX_OUTPUT_BYTES`, and `LEGION_INVOKE_MAX_CONCURRENT_PER_FUNCTION`. Limit errors return HTTP 413 (payload), 429 (concurrency), or 504 (deadline). `/metrics` reports per-function invocation counts and wall time plus replay-derived agent turn and token totals.
+
+Session budgets accept `max_turns`, `max_tool_calls`, `max_tokens_in`, `max_tokens_out`, and `max_wall_ms`. Budget halts are stored as `SessionBudgetHalt` events and set the durable session status to `budget_halt`.
 
 ## Troubleshooting
 

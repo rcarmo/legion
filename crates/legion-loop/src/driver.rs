@@ -120,6 +120,13 @@ impl LegionLoop {
         Ok(())
     }
 
+    async fn halt_budget(&self, run_id: RunId, field: String) -> Result<()> {
+        self.store.append(run_id, TurnEvent::session_budget_halt(&field)).await?;
+        self.store.set_status(run_id, SessionStatus::BudgetHalt {
+            budget_field: field,
+        }).await
+    }
+
     /// Run one full turn: build context → call LLM → dispatch tools → commit.
     /// Returns the `TurnEnvelope` of the assistant message, or an error.
     async fn run_one_turn(
@@ -132,9 +139,7 @@ impl LegionLoop {
 
         // ── Check budget before calling the model ─────────────────────────────
         if let Some(field) = budget.exceeded_by(&config.budget) {
-            self.store.set_status(run_id, SessionStatus::BudgetHalt {
-                budget_field: field.clone(),
-            }).await?;
+            self.halt_budget(run_id, field.clone()).await?;
             return Err(LegionError::BudgetExceeded(field));
         }
 
@@ -237,6 +242,11 @@ impl LegionLoop {
 
         // ── Dispatch tool calls (if any) ──────────────────────────────────────
         for (call_id, tool_name, args) in &tool_calls {
+            if config.budget.max_tool_calls.is_some_and(|max| budget.tool_calls >= max) {
+                let field = "max_tool_calls".to_string();
+                self.halt_budget(run_id, field.clone()).await?;
+                return Err(LegionError::BudgetExceeded(field));
+            }
             let effect = tool_definitions
                 .iter()
                 .find(|td| td.name == *tool_name)
@@ -261,6 +271,7 @@ impl LegionLoop {
 
             // Commit result
             self.store.append(run_id, TurnEvent::tool_result(call_id, result)).await?;
+            budget.tool_calls += 1;
         }
 
         // ── Commit assistant message ──────────────────────────────────────────
@@ -286,6 +297,10 @@ impl LegionLoop {
         budget.tokens_in  += tokens_in as u64;
         budget.tokens_out += tokens_out as u64;
         budget.wall_ms    += wall_ms;
+
+        if let Some(field) = budget.exceeded_by(&config.budget) {
+            self.halt_budget(run_id, field).await?;
+        }
 
         info!(run_id = %run_id, seq, tokens_in, tokens_out, wall_ms, "turn complete");
 
@@ -392,17 +407,23 @@ impl AgentLoopTrait for LegionLoop {
 
         // Accumulate prior usage from log
         for env in &log {
-            if matches!(env.event.kind, TurnEventKind::AssistantMessage) {
-                budget.turns      += 1;
-                budget.tokens_in  += env.event.tokens_in.unwrap_or(0) as u64;
-                budget.tokens_out += env.event.tokens_out.unwrap_or(0) as u64;
-                budget.wall_ms    += env.event.wall_ms.unwrap_or(0);
+            match env.event.kind {
+                TurnEventKind::AssistantMessage => {
+                    budget.turns      += 1;
+                    budget.tokens_in  += env.event.tokens_in.unwrap_or(0) as u64;
+                    budget.tokens_out += env.event.tokens_out.unwrap_or(0) as u64;
+                    budget.wall_ms    += env.event.wall_ms.unwrap_or(0);
+                }
+                TurnEventKind::ToolResult { .. } => budget.tool_calls += 1,
+                _ => {}
             }
         }
 
         // Run one turn
         let result = self.run_one_turn(run_id, &config, &mut budget).await?;
-        self.store.set_status(run_id, SessionStatus::Completed).await?;
+        if !matches!(self.store.session_status(run_id).await?, SessionStatus::BudgetHalt { .. }) {
+            self.store.set_status(run_id, SessionStatus::Completed).await?;
+        }
         Ok(result)
     }
 }
@@ -508,6 +529,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn resolve_persists_budget_halt_before_model_call() {
+        let store = Arc::new(MemoryEventStore::new());
+        let lp = LegionLoop::new(store.clone(), Arc::new(EchoToolRegistry::new()));
+        let run_id = lp.start(RunConfig {
+            system_prompt: None,
+            model: "faux/test".into(),
+            budget: Budget { max_turns: Some(1), ..Default::default() },
+            tools: vec![],
+            metadata: None,
+        }).await.unwrap();
+        store.append(run_id, TurnEvent::assistant_message(
+            serde_json::json!({"content":"prior"}), "faux/test", 1, 1, 1,
+        )).await.unwrap();
+
+        let error = lp.resolve(run_id).await.unwrap_err();
+
+        assert!(matches!(error, LegionError::BudgetExceeded(ref field) if field == "max_turns"));
+        assert_eq!(
+            store.session_status(run_id).await.unwrap(),
+            SessionStatus::BudgetHalt { budget_field: "max_turns".into() },
+        );
+        assert!(store.read_log(run_id).await.unwrap().iter().any(|entry| matches!(
+            &entry.event.kind,
+            TurnEventKind::SessionBudgetHalt { budget_field } if budget_field == "max_turns"
+        )));
+    }
+
+    #[tokio::test]
     async fn recover_fresh_session_ok() {
         let lp = echo_loop();
         let run_id = lp.start(RunConfig {
@@ -559,6 +608,27 @@ impl LegionLoop {
                 Some(c) => c,
                 None => { let _ = tx.send(SessionEvent::Error { message: "no config".into() }).await; return; }
             };
+            let mut budget = BudgetState::default();
+            for entry in &log {
+                match entry.event.kind {
+                    TurnEventKind::AssistantMessage => {
+                        budget.turns += 1;
+                        budget.tokens_in += entry.event.tokens_in.unwrap_or(0) as u64;
+                        budget.tokens_out += entry.event.tokens_out.unwrap_or(0) as u64;
+                        budget.wall_ms += entry.event.wall_ms.unwrap_or(0);
+                    }
+                    TurnEventKind::ToolResult { .. } => budget.tool_calls += 1,
+                    _ => {}
+                }
+            }
+            if let Some(field) = budget.exceeded_by(&config.budget) {
+                if let Err(error) = lp.halt_budget(run_id, field.clone()).await {
+                    let _ = tx.send(SessionEvent::Error { message: error.to_string() }).await;
+                } else {
+                    let _ = tx.send(SessionEvent::BudgetHalt { budget_field: field }).await;
+                }
+                return;
+            }
 
             // Build context + tools
             let recent   = match lp.store.read_recent(run_id, lp.context_window).await {
@@ -623,7 +693,19 @@ impl LegionLoop {
                         if let Ok(seq) = lp.store.append(run_id, ev).await {
                             last_seq = seq;
                         }
-                        let _ = lp.store.set_status(run_id, SessionStatus::Completed).await;
+                        budget.turns += 1;
+                        budget.tokens_in += tokens_in as u64;
+                        budget.tokens_out += tokens_out as u64;
+                        budget.wall_ms += wall_ms;
+                        let halt_field = budget.exceeded_by(&config.budget);
+                        if let Some(field) = &halt_field {
+                            if let Err(error) = lp.halt_budget(run_id, field.clone()).await {
+                                let _ = tx.send(SessionEvent::Error { message: error.to_string() }).await;
+                                return;
+                            }
+                        } else {
+                            let _ = lp.store.set_status(run_id, SessionStatus::Completed).await;
+                        }
                         let _ = tx.send(SessionEvent::Done {
                             content: text_buf.clone(),
                             seq:     last_seq,
@@ -631,6 +713,9 @@ impl LegionLoop {
                             tokens_out,
                             wall_ms,
                         }).await;
+                        if let Some(budget_field) = halt_field {
+                            let _ = tx.send(SessionEvent::BudgetHalt { budget_field }).await;
+                        }
                         break;
                     }
                     rs_ai::events::Event::Error { error, .. } => {

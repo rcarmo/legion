@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use std::collections::HashMap;
 
 use async_trait::async_trait;
@@ -24,11 +24,16 @@ pub struct WasmRuntime {
     pub fn_root: PathBuf,
     /// Compiled plugin cache (function_name → compiled bytes).
     cache: Mutex<HashMap<String, Vec<u8>>>,
+    timeout_ms: u64,
 }
 
 impl WasmRuntime {
     pub fn new(fn_root: PathBuf) -> Self {
-        Self { fn_root, cache: Mutex::new(HashMap::new()) }
+        Self::with_timeout(fn_root, 30_000)
+    }
+
+    pub fn with_timeout(fn_root: PathBuf, timeout_ms: u64) -> Self {
+        Self { fn_root, cache: Mutex::new(HashMap::new()), timeout_ms }
     }
 
     fn load_wasm(&self, function_name: &str) -> Result<Vec<u8>> {
@@ -66,14 +71,16 @@ impl Invoker for WasmRuntime {
         };
 
         let args_json = serde_json::to_string(&req.args)
-            .map_err(|e| LegionError::Serialization(e))?;
+            .map_err(LegionError::Serialization)?;
 
         // Run in a blocking task to avoid blocking the async executor
         let call_id = req.call_id.clone();
+        let timeout_ms = self.timeout_ms;
         let result = tokio::task::spawn_blocking(move || {
             let start = Instant::now();
             let wasm   = Wasm::data(wasm_bytes);
-            let manifest = Manifest::new([wasm]);
+            let manifest = Manifest::new([wasm])
+                .with_timeout(Duration::from_millis(timeout_ms));
             let mut plugin = Plugin::new(manifest, [], true)
                 .map_err(|e| LegionError::ToolError(format!("create plugin: {e}")))?;
 

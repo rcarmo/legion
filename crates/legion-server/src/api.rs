@@ -8,7 +8,7 @@
 //!   GET    /sessions/{id}/stream   — stream one resolve turn via SSE
 //!   GET    /health                 — liveness probe
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use anyhow::Result;
 use axum::{
@@ -29,7 +29,11 @@ use legion_core::types::{Budget, ExternalEvent, RunConfig, SessionFilter};
 use legion_deploy::{DeployJob, DeployPipeline};
 use legion_loop::driver::{LegionLoop, ReconcileAction};
 use legion_namespace::Namespace;
-use legion_runtime::{invoke::{InvokeRequest, Invoker}, manifest::FunctionRuntime};
+use legion_runtime::{
+    invoke::{InvokeRequest, Invoker},
+    manifest::FunctionRuntime,
+    InvocationMetrics,
+};
 
 // ── AppState ──────────────────────────────────────────────────────────────────
 
@@ -41,7 +45,8 @@ pub struct AppState {
     pub namespace:   Namespace,
     pub invoker_bun:  Arc<dyn Invoker>,
     #[cfg(feature = "wasm")]
-    pub invoker_wasm: Arc<legion_runtime::wasm::WasmRuntime>,
+    pub invoker_wasm: Arc<dyn Invoker>,
+    pub invocation_metrics: Arc<InvocationMetrics>,
 }
 
 // ── Request / response types ──────────────────────────────────────────────────
@@ -56,6 +61,7 @@ struct CreateSessionRequest {
 #[derive(Debug, Deserialize)]
 struct BudgetRequest {
     max_turns:      Option<u32>,
+    max_tool_calls: Option<u32>,
     max_tokens_in:  Option<u64>,
     max_tokens_out: Option<u64>,
     max_wall_ms:    Option<u64>,
@@ -88,6 +94,58 @@ struct ReconcileRequest {
 
 async fn health() -> Json<Value> {
     Json(json!({ "ok": true, "version": env!("CARGO_PKG_VERSION") }))
+}
+
+async fn metrics(
+    State(state): State<Arc<AppState>>,
+) -> Result<String, (StatusCode, Json<Value>)> {
+    let mut output = state.invocation_metrics.render_prometheus();
+    let mut by_model: BTreeMap<String, (u64, u64, u64, u64)> = BTreeMap::new();
+    let mut offset = 0;
+
+    loop {
+        let sessions = state.store.list_sessions(SessionFilter {
+            status: None,
+            limit: Some(100),
+            offset: Some(offset),
+        }).await.map_err(|e| server_error(e.to_string()))?;
+        if sessions.is_empty() { break; }
+        offset += sessions.len();
+
+        for session in sessions {
+            let metric = by_model.entry(session.model).or_default();
+            for entry in state.store.read_log(session.run_id).await
+                .map_err(|e| server_error(e.to_string()))?
+            {
+                if matches!(entry.event.kind, legion_core::types::TurnEventKind::AssistantMessage) {
+                    metric.0 += 1;
+                    metric.1 += entry.event.tokens_in.unwrap_or(0) as u64;
+                    metric.2 += entry.event.tokens_out.unwrap_or(0) as u64;
+                    metric.3 += entry.event.wall_ms.unwrap_or(0);
+                }
+            }
+        }
+    }
+
+    output.push_str("# HELP legion_session_turns_total Completed agent turns.\n# TYPE legion_session_turns_total counter\n");
+    for (model, (turns, _, _, _)) in &by_model {
+        output.push_str(&format!("legion_session_turns_total{{model=\"{}\"}} {turns}\n", prometheus_label(model)));
+    }
+    output.push_str("# HELP legion_session_tokens_total Agent tokens by direction.\n# TYPE legion_session_tokens_total counter\n");
+    for (model, (_, tokens_in, tokens_out, _)) in &by_model {
+        let model = prometheus_label(model);
+        output.push_str(&format!("legion_session_tokens_total{{model=\"{model}\",direction=\"input\"}} {tokens_in}\n"));
+        output.push_str(&format!("legion_session_tokens_total{{model=\"{model}\",direction=\"output\"}} {tokens_out}\n"));
+    }
+    output.push_str("# HELP legion_session_turn_wall_ms_total Total agent turn wall time.\n# TYPE legion_session_turn_wall_ms_total counter\n");
+    for (model, (_, _, _, wall_ms)) in &by_model {
+        output.push_str(&format!("legion_session_turn_wall_ms_total{{model=\"{}\"}} {wall_ms}\n", prometheus_label(model)));
+    }
+    Ok(output)
+}
+
+fn prometheus_label(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
 }
 
 async fn list_sessions(
@@ -127,6 +185,7 @@ async fn create_session(
         metadata:      None,
         budget: req.budget.map(|b| Budget {
             max_turns:      b.max_turns,
+            max_tool_calls: b.max_tool_calls,
             max_tokens_in:  b.max_tokens_in,
             max_tokens_out: b.max_tokens_out,
             max_wall_ms:    b.max_wall_ms,
@@ -358,7 +417,7 @@ async fn invoke_function(
     let result = match runtime {
         #[cfg(feature = "wasm")]
         FunctionRuntime::Wasm => state.invoker_wasm.invoke(request).await
-            .map_err(|e| server_error(e.to_string()))?,
+            .map_err(invocation_error)?,
         #[cfg(not(feature = "wasm"))]
         FunctionRuntime::Wasm => {
             return Err((StatusCode::NOT_IMPLEMENTED, Json(json!({
@@ -366,7 +425,7 @@ async fn invoke_function(
             }))));
         }
         FunctionRuntime::Bun => state.invoker_bun.invoke(request).await
-            .map_err(|e| server_error(e.to_string()))?,
+            .map_err(invocation_error)?,
     };
 
     if let Some(err) = result.error {
@@ -412,6 +471,16 @@ async fn session_webhook(
     })))
 }
 
+fn invocation_error(error: legion_core::error::LegionError) -> (StatusCode, Json<Value>) {
+    let status = match &error {
+        legion_core::error::LegionError::InvocationLimitExceeded { .. } => StatusCode::PAYLOAD_TOO_LARGE,
+        legion_core::error::LegionError::InvocationBusy(_) => StatusCode::TOO_MANY_REQUESTS,
+        legion_core::error::LegionError::InvocationTimeout { .. } => StatusCode::GATEWAY_TIMEOUT,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    (status, Json(json!({ "error": error.to_string() })))
+}
+
 fn server_error(msg: String) -> (StatusCode, Json<Value>) {
     (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": msg })))
 }
@@ -426,6 +495,7 @@ pub async fn serve(state: Arc<AppState>, addr: String, api_key: Option<String>) 
 
     let app = Router::new()
         .route("/health",                          get(health))
+        .route("/metrics",                         get(metrics))
         .route("/cluster/peers",                   get(cluster_peers))
         .route("/sessions",                        get(list_sessions).post(create_session))
         .route("/sessions/{id}",                   get(get_session))

@@ -347,5 +347,10 @@ mod tests {
         assert!(state.exceeded_by(&budget).is_none());
         state.turns = 3;
         assert_eq!(state.exceeded_by(&budget).as_deref(), Some("max_turns"));
+
+        let tool_budget = Budget { max_tool_calls: Some(2), ..Default::default() };
+        state = BudgetState::default();
+        state.tool_calls = 2;
+        assert_eq!(state.exceeded_by(&tool_budget).as_deref(), Some("max_tool_calls"));
     }
 }

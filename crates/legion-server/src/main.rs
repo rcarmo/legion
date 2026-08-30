@@ -16,7 +16,10 @@ use legion_core::ChainRegistry;
 use legion_deploy::DeployPipeline;
 use legion_loop::driver::LegionLoop;
 use legion_namespace::Namespace;
-use legion_runtime::{bun::BunRuntime, registry_bridge::RegistryBridge};
+use legion_runtime::{
+    bun::BunRuntime, registry_bridge::RegistryBridge, BoundedInvoker,
+    InvocationMetrics,
+};
 #[cfg(feature = "wasm")]
 use legion_runtime::wasm::WasmRuntime;
 use legion_store::SqliteStore;
@@ -34,6 +37,19 @@ async fn main() -> Result<()> {
         run_server().await
     } else {
         cli::run(command).await
+    }
+}
+
+fn apply_env<T>(target: &mut T, name: &str)
+where
+    T: std::str::FromStr,
+{
+    if let Ok(value) = std::env::var(name) {
+        if let Ok(parsed) = value.parse() {
+            *target = parsed;
+        } else {
+            warn!(name, value, "ignoring invalid environment override");
+        }
     }
 }
 
@@ -59,6 +75,13 @@ async fn run_server() -> Result<()> {
     if let Ok(dir) = std::env::var("LEGION_DATA_DIR") {
         cfg.cluster.data_dir = std::path::PathBuf::from(dir);
     }
+    apply_env(&mut cfg.invocation.timeout_ms, "LEGION_INVOKE_TIMEOUT_MS");
+    apply_env(&mut cfg.invocation.max_input_bytes, "LEGION_INVOKE_MAX_INPUT_BYTES");
+    apply_env(&mut cfg.invocation.max_output_bytes, "LEGION_INVOKE_MAX_OUTPUT_BYTES");
+    apply_env(
+        &mut cfg.invocation.max_concurrent_per_function,
+        "LEGION_INVOKE_MAX_CONCURRENT_PER_FUNCTION",
+    );
     info!(
         data_dir = %cfg.cluster.data_dir.display(),
         api_port = cfg.cluster.api_port,
@@ -156,9 +179,26 @@ async fn run_server() -> Result<()> {
     let deployer = Arc::new(DeployPipeline::new(fn_root.clone(), namespace.clone()));
 
     // ── Tool registries ───────────────────────────────────────────────────────
-    let bun_runtime = Arc::new(BunRuntime { fn_root, ..Default::default() });
+    let invocation_metrics = Arc::new(InvocationMetrics::default());
+    let bun_backend = Arc::new(BunRuntime { fn_root, ..Default::default() });
+    let bun_runtime: Arc<dyn legion_runtime::invoke::Invoker> = Arc::new(BoundedInvoker::new(
+        bun_backend,
+        "bun",
+        cfg.invocation.clone(),
+        invocation_metrics.clone(),
+    ));
     #[cfg(feature = "wasm")]
-    let wasm_runtime = Arc::new(WasmRuntime::new(cfg.cluster.data_dir.join("fn")));
+    let wasm_backend = Arc::new(WasmRuntime::with_timeout(
+        cfg.cluster.data_dir.join("fn"),
+        cfg.invocation.timeout_ms,
+    ));
+    #[cfg(feature = "wasm")]
+    let wasm_runtime: Arc<dyn legion_runtime::invoke::Invoker> = Arc::new(BoundedInvoker::new(
+        wasm_backend,
+        "wasm",
+        cfg.invocation.clone(),
+        invocation_metrics.clone(),
+    ));
     let bridge = RegistryBridge::new(namespace.clone(), bun_runtime.clone());
     #[cfg(feature = "wasm")]
     let bridge = bridge.with_wasm(wasm_runtime.clone());
@@ -185,9 +225,10 @@ async fn run_server() -> Result<()> {
         lp,
         deployer,
         namespace,
-        invoker_bun: bun_runtime as Arc<dyn legion_runtime::invoke::Invoker>,
+        invoker_bun: bun_runtime,
         #[cfg(feature = "wasm")]
         invoker_wasm: wasm_runtime,
+        invocation_metrics,
     });
     let addr  = format!("0.0.0.0:{}", cfg.cluster.api_port);
     api::serve(state, addr, api_key).await?;

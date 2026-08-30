@@ -48,7 +48,7 @@ impl Invoker for BunRuntime {
         }
 
         let args_json = serde_json::to_string(&req.args)
-            .map_err(|e| LegionError::Serialization(e))?;
+            .map_err(LegionError::Serialization)?;
 
         debug!(fn_name = %req.function_name, "invoking bun function");
         let start = Instant::now();
@@ -59,6 +59,7 @@ impl Invoker for BunRuntime {
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
             .spawn()
             .map_err(|e| LegionError::ToolError(format!("spawn bun: {e}")))?;
 

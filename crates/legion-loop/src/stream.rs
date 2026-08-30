@@ -27,6 +27,8 @@ pub enum SessionEvent {
         tokens_out: u32,
         wall_ms:    u64,
     },
+    /// A configured session budget was reached.
+    BudgetHalt { budget_field: String },
     /// An error occurred.
     Error { message: String },
 }

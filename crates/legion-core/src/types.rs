@@ -16,6 +16,7 @@ pub type SeqNum = u64;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Budget {
     pub max_turns:      Option<u32>,
+    pub max_tool_calls: Option<u32>,
     pub max_tokens_in:  Option<u64>,
     pub max_tokens_out: Option<u64>,
     pub max_wall_ms:    Option<u64>,
@@ -26,6 +27,7 @@ pub struct Budget {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BudgetState {
     pub turns:      u32,
+    pub tool_calls: u32,
     pub tokens_in:  u64,
     pub tokens_out: u64,
     pub wall_ms:    u64,
@@ -36,19 +38,22 @@ impl BudgetState {
     /// Check whether any budget limit has been exceeded.
     /// Returns the name of the first exceeded field, or `None`.
     pub fn exceeded_by(&self, budget: &Budget) -> Option<String> {
-        if budget.max_turns.map_or(false, |m| self.turns >= m) {
+        if budget.max_turns.is_some_and(|m| self.turns >= m) {
             return Some("max_turns".into());
         }
-        if budget.max_tokens_in.map_or(false, |m| self.tokens_in >= m) {
+        if budget.max_tool_calls.is_some_and(|m| self.tool_calls >= m) {
+            return Some("max_tool_calls".into());
+        }
+        if budget.max_tokens_in.is_some_and(|m| self.tokens_in >= m) {
             return Some("max_tokens_in".into());
         }
-        if budget.max_tokens_out.map_or(false, |m| self.tokens_out >= m) {
+        if budget.max_tokens_out.is_some_and(|m| self.tokens_out >= m) {
             return Some("max_tokens_out".into());
         }
-        if budget.max_wall_ms.map_or(false, |m| self.wall_ms >= m) {
+        if budget.max_wall_ms.is_some_and(|m| self.wall_ms >= m) {
             return Some("max_wall_ms".into());
         }
-        if budget.max_cost_usd.map_or(false, |m| self.cost_usd >= m) {
+        if budget.max_cost_usd.is_some_and(|m| self.cost_usd >= m) {
             return Some("max_cost_usd".into());
         }
         None
@@ -258,6 +263,19 @@ impl TurnEvent {
             tokens_in:   None,
             tokens_out:  None,
             wall_ms:     None,
+        }
+    }
+
+    pub fn session_budget_halt(field: impl Into<String>) -> Self {
+        let field = field.into();
+        Self {
+            kind: TurnEventKind::SessionBudgetHalt { budget_field: field.clone() },
+            payload: Some(serde_json::json!({ "budget_field": field })),
+            payload_cid: None,
+            model: None,
+            tokens_in: None,
+            tokens_out: None,
+            wall_ms: None,
         }
     }
 
