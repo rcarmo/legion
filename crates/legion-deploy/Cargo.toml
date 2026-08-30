@@ -7,3 +7,17 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+legion-core      = { path = "../legion-core" }
+legion-namespace = { path = "../legion-namespace" }
+legion-runtime   = { path = "../legion-runtime" }
+tokio       = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+anyhow      = { workspace = true }
+tracing     = { workspace = true }
+bytes       = { workspace = true }
+uuid        = { workspace = true }
+chrono      = { workspace = true }
+[dev-dependencies]
+tempfile = "3"

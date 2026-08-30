@@ -26,15 +26,20 @@ use legion_core::{
     traits::{AgentLoopTrait, EventStore},
     types::{Budget, ExternalEvent, RunConfig},
 };
+use legion_deploy::{DeployJob, DeployPipeline};
 use legion_loop::driver::LegionLoop;
+use legion_namespace::Namespace;
+use legion_runtime::manifest::FunctionRuntime;
 use legion_store::SqliteStore;
 
 // ── AppState ──────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 pub struct AppState {
-    pub store: SqliteStore,
-    pub lp:    Arc<LegionLoop>,
+    pub store:    SqliteStore,
+    pub lp:       Arc<LegionLoop>,
+    pub deployer: Arc<DeployPipeline>,
+    pub namespace: Namespace,
 }
 
 // ── Request / response types ──────────────────────────────────────────────────
@@ -52,6 +57,16 @@ struct BudgetRequest {
     max_tokens_in:  Option<u64>,
     max_tokens_out: Option<u64>,
     max_wall_ms:    Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeployRequest {
+    name:        String,
+    runtime:     Option<String>,
+    description: Option<String>,
+    code:        String,
+    idempotent:  Option<bool>,
+    parameters:  Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,7 +177,55 @@ async fn send_message(
     })))
 }
 
-// ── Error helpers ─────────────────────────────────────────────────────────────
+async fn deploy_function(
+    State(state): State<Arc<AppState>>,
+    Json(req):    Json<DeployRequest>,
+) -> Result<(StatusCode, Json<Value>), (StatusCode, Json<Value>)> {
+    let runtime = match req.runtime.as_deref().unwrap_or("bun") {
+        "wasm" => FunctionRuntime::Wasm,
+        _      => FunctionRuntime::Bun,
+    };
+    let mut job = DeployJob::new(
+        req.name,
+        runtime,
+        req.description.unwrap_or_default(),
+        req.code,
+    );
+    if let Some(p) = req.parameters { job.parameters = p; }
+    if let Some(i) = req.idempotent  { job.idempotent = i; }
+
+    let outcome = state.deployer.deploy(job).await;
+    if outcome.status == legion_deploy::DeployStatus::Success {
+        Ok((StatusCode::CREATED, Json(serde_json::to_value(&outcome).unwrap())))
+    } else {
+        Err((StatusCode::UNPROCESSABLE_ENTITY, Json(serde_json::to_value(&outcome).unwrap())))
+    }
+}
+
+async fn list_functions(
+    State(state): State<Arc<AppState>>,
+) -> Json<Value> {
+    let names = state.namespace.ls("/fn").await;
+    let mut fns = vec![];
+    for name in names {
+        let path = format!("/fn/{name}/manifest.json");
+        if let Some(n) = state.namespace.get(&path).await {
+            if let legion_namespace::NodeKind::Json(v) = n.kind {
+                fns.push(v);
+            }
+        }
+    }
+    Json(json!({ "functions": fns }))
+}
+
+async fn delete_function(
+    State(state): State<Arc<AppState>>,
+    Path(name):   Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    state.deployer.undeploy(&name).await
+        .map_err(|e| server_error(e.to_string()))?;
+    Ok(Json(json!({ "name": name, "deleted": true })))
+}
 
 fn server_error(msg: String) -> (StatusCode, Json<Value>) {
     (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": msg })))
@@ -180,6 +243,8 @@ pub async fn serve(state: Arc<AppState>, addr: String) -> Result<()> {
         .route("/sessions/:id",          get(get_session))
         .route("/sessions/:id/log",      get(get_log))
         .route("/sessions/:id/messages", post(send_message))
+        .route("/functions",             get(list_functions).post(deploy_function))
+        .route("/functions/:name",       axum::routing::delete(delete_function))
         .with_state(state)
         .layer(tower_http::trace::TraceLayer::new_for_http());
 

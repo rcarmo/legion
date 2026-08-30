@@ -1902,6 +1902,21 @@ dependencies = [
 [[package]]
 name = "legion-deploy"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "legion-core",
+ "legion-namespace",
+ "legion-runtime",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "legion-loop"
@@ -1961,7 +1976,10 @@ dependencies = [
  "chrono",
  "legion-cluster",
  "legion-core",
+ "legion-deploy",
  "legion-loop",
+ "legion-namespace",
+ "legion-runtime",
  "legion-store",
  "serde",
  "serde_json",

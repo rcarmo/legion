@@ -14,7 +14,10 @@ path = "src/main.rs"
 legion-core    = { path = "../legion-core" }
 legion-store   = { path = "../legion-store" }
 legion-loop    = { path = "../legion-loop" }
-legion-cluster = { path = "../legion-cluster" }
+legion-cluster   = { path = "../legion-cluster" }
+legion-deploy    = { path = "../legion-deploy" }
+legion-namespace = { path = "../legion-namespace" }
+legion-runtime   = { path = "../legion-runtime" }
 
 tokio            = { workspace = true }
 anyhow           = { workspace = true }
