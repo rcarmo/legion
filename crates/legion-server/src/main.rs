@@ -157,7 +157,12 @@ async fn run_server() -> Result<()> {
 
     // ── Tool registries ───────────────────────────────────────────────────────
     let bun_runtime = Arc::new(BunRuntime { fn_root, ..Default::default() });
-    let bridge   = Arc::new(RegistryBridge::new(namespace.clone(), bun_runtime.clone()));
+    #[cfg(feature = "wasm")]
+    let wasm_runtime = Arc::new(WasmRuntime::new(cfg.cluster.data_dir.join("fn")));
+    let bridge = RegistryBridge::new(namespace.clone(), bun_runtime.clone());
+    #[cfg(feature = "wasm")]
+    let bridge = bridge.with_wasm(wasm_runtime.clone());
+    let bridge = Arc::new(bridge);
     let builtins = Arc::new(BuiltinToolRegistry::new(
         arc_store.clone(),
         node.clone(),
@@ -182,7 +187,7 @@ async fn run_server() -> Result<()> {
         namespace,
         invoker_bun: bun_runtime as Arc<dyn legion_runtime::invoke::Invoker>,
         #[cfg(feature = "wasm")]
-        invoker_wasm: Arc::new(WasmRuntime::new(cfg.cluster.data_dir.join("fn"))),
+        invoker_wasm: wasm_runtime,
     });
     let addr  = format!("0.0.0.0:{}", cfg.cluster.api_port);
     api::serve(state, addr, api_key).await?;

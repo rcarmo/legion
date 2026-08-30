@@ -76,7 +76,8 @@ impl LegionLoop {
         let messages = build_messages(&recent);
 
         // ── Build tool definitions for rs-ai ─────────────────────────────────
-        let rs_tools: Vec<Tool> = self.tools.definitions().iter().map(|td| {
+        let tool_definitions = self.tools.definitions().await;
+        let rs_tools: Vec<Tool> = tool_definitions.iter().map(|td| {
             Tool {
                 name:        td.name.clone(),
                 description: td.description.clone(),
@@ -169,7 +170,7 @@ impl LegionLoop {
 
         // ── Dispatch tool calls (if any) ──────────────────────────────────────
         for (call_id, tool_name, args) in &tool_calls {
-            let effect = self.tools.definitions()
+            let effect = tool_definitions
                 .iter()
                 .find(|td| td.name == *tool_name)
                 .map(|td| td.effect.clone())
@@ -445,7 +446,8 @@ impl LegionLoop {
                 Err(e) => { let _ = tx.send(SessionEvent::Error { message: e.to_string() }).await; return; }
             };
             let messages = crate::context::build_messages(&recent);
-            let rs_tools: Vec<rs_ai::types::Tool> = lp.tools.definitions().iter().map(|td| {
+            let tool_definitions = lp.tools.definitions().await;
+            let rs_tools: Vec<rs_ai::types::Tool> = tool_definitions.iter().map(|td| {
                 rs_ai::types::Tool {
                     name:        td.name.clone(),
                     description: td.description.clone(),

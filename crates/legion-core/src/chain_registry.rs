@@ -31,11 +31,11 @@ impl ChainRegistry {
 
 #[async_trait]
 impl ToolRegistry for ChainRegistry {
-    fn definitions(&self) -> Vec<ToolDefinition> {
+    async fn definitions(&self) -> Vec<ToolDefinition> {
         let mut seen  = std::collections::HashSet::new();
         let mut defs  = Vec::new();
         for r in &self.registries {
-            for d in r.definitions() {
+            for d in r.definitions().await {
                 if seen.insert(d.name.clone()) {
                     defs.push(d);
                 }
@@ -47,7 +47,7 @@ impl ToolRegistry for ChainRegistry {
     async fn dispatch(&self, name: &str, args: Value) -> Result<Value> {
         for r in &self.registries {
             let known: std::collections::HashSet<_> =
-                r.definitions().into_iter().map(|d| d.name).collect();
+                r.definitions().await.into_iter().map(|d| d.name).collect();
             if known.contains(name) {
                 return r.dispatch(name, args).await;
             }

@@ -226,7 +226,7 @@ impl EchoToolRegistry {
 
 #[async_trait]
 impl ToolRegistry for EchoToolRegistry {
-    fn definitions(&self) -> Vec<ToolDefinition> {
+    async fn definitions(&self) -> Vec<ToolDefinition> {
         self.tools.clone()
     }
 

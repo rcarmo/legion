@@ -70,7 +70,7 @@ pub trait AgentLoopTrait: Send + Sync {
 #[async_trait]
 pub trait ToolRegistry: Send + Sync {
     /// Return the definitions of all registered tools.
-    fn definitions(&self) -> Vec<ToolDefinition>;
+    async fn definitions(&self) -> Vec<ToolDefinition>;
 
     /// Dispatch a tool call by name with the given JSON arguments.
     async fn dispatch(

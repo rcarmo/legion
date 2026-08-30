@@ -40,7 +40,7 @@ impl BuiltinToolRegistry {
 
 #[async_trait::async_trait]
 impl ToolRegistry for BuiltinToolRegistry {
-    fn definitions(&self) -> Vec<ToolDefinition> {
+    async fn definitions(&self) -> Vec<ToolDefinition> {
         build_definitions()
     }
 
