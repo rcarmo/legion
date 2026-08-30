@@ -1,0 +1,71 @@
+[workspace]
+members = [
+    "crates/legion-core",
+    "crates/legion-store",
+    "crates/legion-loop",
+    "crates/legion-namespace",
+    "crates/legion-cluster",
+    "crates/legion-runtime",
+    "crates/legion-deploy",
+    "crates/legion-server",
+]
+resolver = "2"
+
+[workspace.package]
+version     = "0.1.0"
+edition     = "2024"
+license     = "MIT"
+repository  = "https://github.com/rcarmo/legion"
+rust-version = "1.95"
+
+[workspace.dependencies]
+# Core async
+tokio       = { version = "1", features = ["full"] }
+async-trait = "0.1"
+futures     = "0.3"
+
+# Serialization
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+
+# Error handling
+thiserror   = "2"
+anyhow      = "1"
+
+# Tracing
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# LLM
+rs-ai = { git = "https://github.com/rcarmo/rs-ai" }
+
+# Storage
+hiqlite  = { version = "0.14", features = ["sqlite", "auto-heal", "listen_notify_local", "dlock"] }
+fjall    = "3"
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# P2P networking
+iroh                      = "1"
+iroh-blobs                = "0.103"
+iroh-gossip               = "0.101"
+iroh-mdns-address-lookup  = "0.5"
+mdns-sd                   = "0.21"
+
+# 9P namespace
+jetstream_9p = "16"
+
+# WASM runtime
+wasmtime = { version = "48", features = ["cranelift", "component-model"] }
+extism   = "1"
+
+# Utilities
+uuid   = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+sha2   = "0.10"
+bytes  = "1"
+rand   = "0.8"
+
+[profile.release]
+opt-level = 3
+lto       = "thin"
+strip     = true
