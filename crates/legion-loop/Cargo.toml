@@ -7,3 +7,14 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+legion-core = { path = "../legion-core" }
+rs-ai       = { path = "../../../rs-ai", default-features = false }
+async-trait = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+tokio       = { workspace = true }
+uuid        = { workspace = true }
+chrono      = { workspace = true }
+futures     = { workspace = true }
+tracing     = { workspace = true }
