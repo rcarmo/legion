@@ -12,10 +12,10 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version     = "0.1.0"
-edition     = "2024"
-license     = "MIT"
-repository  = "https://github.com/rcarmo/legion"
+version      = "0.1.0"
+edition      = "2024"
+license      = "MIT"
+repository   = "https://github.com/rcarmo/legion"
 rust-version = "1.95"
 
 [workspace.dependencies]
@@ -27,6 +27,7 @@ futures     = "0.3"
 # Serialization
 serde       = { version = "1", features = ["derive"] }
 serde_json  = "1"
+toml        = "0.8"
 
 # Error handling
 thiserror   = "2"
@@ -34,36 +35,41 @@ anyhow      = "1"
 
 # Tracing
 tracing            = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # LLM
 rs-ai = { path = "../../rs-ai", default-features = false }
 
-# Storage
-hiqlite  = { version = "0.14", features = ["sqlite", "auto-heal", "listen_notify_local", "dlock"] }
-fjall    = "3"
+# HTTP
+axum       = "0.8"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# Storage – single-node
 rusqlite = { version = "0.31", features = ["bundled"] }
 
-# P2P networking
-iroh                      = "1"
-iroh-blobs                = "0.103"
-iroh-gossip               = "0.101"
-iroh-mdns-address-lookup  = "0.5"
-mdns-sd                   = "0.21"
+# Storage – distributed (Milestone 1+)
+hiqlite = { version = "0.14", default-features = false, features = ["sqlite", "auto-heal", "listen_notify_local", "dlock"] }
 
-# 9P namespace
+# P2P networking (Milestone 1+)
+iroh                     = "1"
+iroh-blobs               = "0.103"
+iroh-gossip              = "0.101"
+iroh-mdns-address-lookup = "0.5"
+mdns-sd                  = "0.21"
+
+# 9P namespace (Milestone 2+)
 jetstream_9p = "16"
 
-# WASM runtime
+# WASM runtime (Milestone 3+)
 wasmtime = { version = "48", features = ["cranelift", "component-model"] }
 extism   = "1"
 
 # Utilities
-uuid   = { version = "1", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] }
-sha2   = "0.10"
-bytes  = "1"
-rand   = "0.8"
+uuid    = { version = "1", features = ["v4", "serde"] }
+chrono  = { version = "0.4", features = ["serde"] }
+sha2    = "0.10"
+bytes   = "1"
+rand    = "0.8"
 
 [profile.release]
 opt-level = 3

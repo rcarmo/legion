@@ -6,4 +6,24 @@ license.workspace    = true
 repository.workspace = true
 rust-version.workspace = true
 
+[[bin]]
+name = "legion"
+path = "src/main.rs"
+
 [dependencies]
+legion-core    = { path = "../legion-core" }
+legion-store   = { path = "../legion-store" }
+legion-loop    = { path = "../legion-loop" }
+legion-cluster = { path = "../legion-cluster" }
+
+tokio            = { workspace = true }
+anyhow           = { workspace = true }
+serde            = { workspace = true }
+serde_json       = { workspace = true }
+toml             = { workspace = true }
+tracing          = { workspace = true }
+tracing-subscriber = { workspace = true }
+axum             = { workspace = true }
+tower-http       = { workspace = true }
+uuid             = { workspace = true }
+chrono           = { workspace = true }

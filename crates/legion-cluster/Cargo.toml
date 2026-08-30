@@ -7,3 +7,19 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+legion-core = { path = "../legion-core" }
+tokio       = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+anyhow      = { workspace = true }
+tracing     = { workspace = true }
+futures     = { workspace = true }
+rand        = { workspace = true }
+iroh                     = { workspace = true }
+iroh-gossip              = { workspace = true }
+iroh-mdns-address-lookup = { workspace = true }
+mdns-sd                  = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
