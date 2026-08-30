@@ -16,6 +16,8 @@ use legion_loop::driver::LegionLoop;
 use legion_namespace::Namespace;
 use legion_runtime::{bun::BunRuntime, registry_bridge::RegistryBridge};
 use legion_store::SqliteStore;
+#[cfg(feature = "distributed")]
+use legion_store::HiqliteStore;
 
 use api::AppState;
 use config::ServerConfig;
@@ -65,10 +67,49 @@ async fn main() -> Result<()> {
 
     // ── Storage ───────────────────────────────────────────────────────────────
     std::fs::create_dir_all(&cfg.cluster.data_dir)?;
-    let db_path   = cfg.cluster.data_dir.join("sessions.db");
-    let store     = SqliteStore::open(&db_path)?;
-    let arc_store = Arc::new(store.clone()) as Arc<dyn legion_core::traits::EventStore>;
-    info!(db = %db_path.display(), "event store ready");
+
+    // Choose store: multi-node Raft (hiqlite) or single-node SQLite
+    let arc_store: Arc<dyn legion_core::traits::EventStore>;
+    // Keep SqliteStore in scope for AppState (single-node path)
+    let sqlite_store_opt: Option<SqliteStore>;
+
+    #[cfg(feature = "distributed")]
+    if !cfg.raft_peers.is_empty() {
+        use hiqlite::{Node, NodeConfig as HqlNodeConfig};
+        let data_dir = cfg.cluster.data_dir.join("raft");
+        let peers: Vec<Node> = cfg.raft_peers.iter().map(|p| Node {
+            id:        p.id,
+            addr_raft: p.addr_raft.clone(),
+            addr_api:  p.addr_api.clone(),
+        }).collect();
+        let hql_cfg = HqlNodeConfig {
+            node_id:     cfg.raft_node_id,
+            nodes:       peers,
+            data_dir:    data_dir.to_string_lossy().to_string().into(),
+            secret_raft: cfg.raft_secret.clone(),
+            secret_api:  cfg.raft_api_secret.clone(),
+            ..Default::default()
+        };
+        info!(node_id = cfg.raft_node_id, peers = cfg.raft_peers.len(), "starting distributed hiqlite store");
+        let hs = HiqliteStore::connect(hql_cfg).await?;
+        arc_store = Arc::new(hs);
+        sqlite_store_opt = None;
+    } else {
+        let db_path = cfg.cluster.data_dir.join("sessions.db");
+        let s = SqliteStore::open(&db_path)?;
+        info!(db = %db_path.display(), "event store ready (sqlite)");
+        arc_store = Arc::new(s.clone());
+        sqlite_store_opt = Some(s);
+    }
+
+    #[cfg(not(feature = "distributed"))]
+    {
+        let db_path = cfg.cluster.data_dir.join("sessions.db");
+        let s = SqliteStore::open(&db_path)?;
+        info!(db = %db_path.display(), "event store ready (sqlite)");
+        arc_store = Arc::new(s.clone());
+        sqlite_store_opt = Some(s);
+    }
 
     // ── Namespace ─────────────────────────────────────────────────────────────
     let namespace = Namespace::new();
@@ -126,7 +167,7 @@ async fn main() -> Result<()> {
     // ── REST API ──────────────────────────────────────────────────────────────
     let api_key = std::env::var("LEGION_API_KEY").ok().or(cfg.api_key.clone());
     if api_key.is_some() { info!("API key authentication enabled"); } else { warn!("no API key set — server is open"); }
-    let state = Arc::new(AppState { store, lp, deployer, namespace, invoker: bun_runtime as Arc<dyn legion_runtime::invoke::Invoker> });
+    let state = Arc::new(AppState { store: arc_store, lp, deployer, namespace, invoker: bun_runtime as Arc<dyn legion_runtime::invoke::Invoker> });
     let addr  = format!("0.0.0.0:{}", cfg.cluster.api_port);
     api::serve(state, addr, api_key).await?;
     Ok(())

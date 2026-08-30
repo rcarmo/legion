@@ -10,6 +10,9 @@ rust-version.workspace = true
 name = "legion"
 path = "src/main.rs"
 
+[features]
+distributed = ["legion-store/distributed", "hiqlite"]
+
 [dependencies]
 legion-core    = { path = "../legion-core" }
 legion-store   = { path = "../legion-store" }
@@ -19,6 +22,7 @@ legion-deploy    = { path = "../legion-deploy" }
 legion-namespace = { path = "../legion-namespace" }
 legion-runtime   = { path = "../legion-runtime" }
 
+hiqlite     = { workspace = true, optional = true }
 futures          = { workspace = true }
 tokio            = { workspace = true }
 anyhow           = { workspace = true }

@@ -3313,6 +3313,7 @@ dependencies = [
  "axum",
  "chrono",
  "futures",
+ "hiqlite",
  "legion-cluster",
  "legion-core",
  "legion-deploy",

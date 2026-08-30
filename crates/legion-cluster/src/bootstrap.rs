@@ -2,11 +2,9 @@
 //! single-node cluster or join an existing one.
 
 use std::collections::HashSet;
-use std::time::Duration;
 
 use anyhow::Result;
 use iroh::EndpointId;
-use tokio::time::timeout;
 use tracing::{info, warn};
 
 use crate::bonjour::BonjourRegistration;
@@ -22,7 +20,7 @@ pub enum BootstrapOutcome {
 }
 
 /// Duration to listen for mDNS peers before deciding.
-const DISCOVERY_WINDOW: Duration = Duration::from_secs(3);
+const DISCOVERY_WINDOW: tokio::time::Duration = tokio::time::Duration::from_secs(3);
 
 /// Run the bootstrap probe: register on Bonjour, listen for other nodes,
 /// then decide whether to become a single-node leader or join peers.
@@ -44,31 +42,29 @@ pub async fn run_bootstrap(node: &ClusterNode) -> Result<BootstrapOutcome> {
 
     info!("bootstrap probe: {}ms window", DISCOVERY_WINDOW.as_millis());
 
-    // Non-blocking channel drain with timeout
-    let _ = timeout(DISCOVERY_WINDOW, async {
-        loop {
-            match receiver.recv() {
-                Ok(mdns_sd::ServiceEvent::ServiceResolved(info)) => {
-                    if let Some(pid_prop) = info.get_properties().get("node_id") {
-                            let pid = pid_prop.val_str();
-                            if pid != self_id {
-                                info!(peer_id = %pid, "discovered peer during bootstrap");
-                                peers.insert(format!(
-                                    "{}:{}",
-                                    info.get_hostname(),
-                                    info.get_port()
-                                ));
-                            }
-                        }
-                }
-                Ok(_)  => {}
-                Err(e) => {
-                    warn!("mdns recv: {e}");
-                    break;
+    let deadline = tokio::time::Instant::now() + DISCOVERY_WINDOW;
+    loop {
+        if tokio::time::Instant::now() >= deadline { break; }
+        match receiver.try_recv() {
+            Ok(mdns_sd::ServiceEvent::ServiceResolved(info)) => {
+                if let Some(pid_prop) = info.get_properties().get("node_id") {
+                    let pid = pid_prop.val_str();
+                    if pid != self_id {
+                        info!(peer_id = %pid, "discovered peer during bootstrap");
+                        peers.insert(format!("{}:{}", info.get_hostname(), info.get_port()));
+                    }
                 }
             }
+            Ok(_)  => {}
+            Err(mdns_sd::TryRecvError::Empty) => {
+                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            }
+            Err(e) => {
+                warn!("mdns recv: {e}");
+                break;
+            }
         }
-    }).await;
+    }
 
     let outcome = if peers.is_empty() {
         info!(node = %self_id, "no peers — bootstrapping as single-node leader");

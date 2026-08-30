@@ -23,21 +23,18 @@ use serde_json::{json, Value};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use legion_core::{
-    traits::{AgentLoopTrait, EventStore},
-    types::{Budget, ExternalEvent, RunConfig},
-};
+use legion_core::traits::{AgentLoopTrait, EventStore};
+use legion_core::types::{Budget, ExternalEvent, RunConfig};
 use legion_deploy::{DeployJob, DeployPipeline};
 use legion_loop::{driver::LegionLoop, SessionEvent};
 use legion_namespace::{Namespace, NodeKind};
 use legion_runtime::{invoke::{InvokeRequest, Invoker}, manifest::FunctionRuntime};
-use legion_store::SqliteStore;
 
 // ── AppState ──────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 pub struct AppState {
-    pub store:     SqliteStore,
+    pub store:     Arc<dyn EventStore>,
     pub lp:        Arc<LegionLoop>,
     pub deployer:  Arc<DeployPipeline>,
     pub namespace: Namespace,
@@ -332,14 +329,14 @@ pub async fn serve(state: Arc<AppState>, addr: String, api_key: Option<String>) 
     let app = Router::new()
         .route("/health",                          get(health))
         .route("/sessions",                        post(create_session))
-        .route("/sessions/:id",                    get(get_session))
-        .route("/sessions/:id/log",                get(get_log))
-        .route("/sessions/:id/messages",           post(send_message))
-        .route("/sessions/:id/stream",             get(stream_session))
-        .route("/sessions/:id/events",             post(session_webhook))
+        .route("/sessions/{id}",                   get(get_session))
+        .route("/sessions/{id}/log",               get(get_log))
+        .route("/sessions/{id}/messages",          post(send_message))
+        .route("/sessions/{id}/stream",            get(stream_session))
+        .route("/sessions/{id}/events",            post(session_webhook))
         .route("/functions",                       get(list_functions).post(deploy_function))
-        .route("/functions/:name",                 axum::routing::delete(delete_function))
-        .route("/functions/:name/invoke",          post(invoke_function))
+        .route("/functions/{name}",                axum::routing::delete(delete_function))
+        .route("/functions/{name}/invoke",         post(invoke_function))
         .with_state(state)
         .route_layer(middleware::from_fn_with_state(
             api_key,
