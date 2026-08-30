@@ -14,7 +14,7 @@ use legion_core::{
     traits::{EventStore, ToolRegistry},
     types::{
         EffectClass, ParkReason, RunId, SessionFilter, SessionStatus, ToolDefinition,
-        TurnEvent, TurnEventKind,
+        TurnEvent,
     },
 };
 use legion_namespace::{Namespace, NodeKind};

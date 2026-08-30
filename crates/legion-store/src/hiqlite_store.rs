@@ -351,12 +351,17 @@ impl EventStore for HiqliteStore {
     async fn list_sessions(&self, filter: SessionFilter) -> Result<Vec<SessionSummary>> {
         let limit  = filter.limit.unwrap_or(100) as i64;
         let offset = filter.offset.unwrap_or(0) as i64;
+        let status = filter.status;
 
         let rows: Vec<SessionRow> = self.client.query_as(
             "SELECT s.run_id, s.status, s.config, s.created_at, s.updated_at,
                     (SELECT COUNT(*) FROM turns t WHERE t.run_id = s.run_id) as turns
-             FROM sessions s ORDER BY s.created_at DESC LIMIT $1 OFFSET $2",
-            params!(limit, offset),
+             FROM sessions s
+             WHERE $3 IS NULL
+                OR (json_valid(s.status) AND json_extract(s.status, '$.status') = $3)
+                OR s.status = $3
+             ORDER BY s.created_at DESC LIMIT $1 OFFSET $2",
+            params!(limit, offset, status),
         ).await.map_err(|e| LegionError::Store(e.to_string()))?;
 
         rows.into_iter().map(|r| {

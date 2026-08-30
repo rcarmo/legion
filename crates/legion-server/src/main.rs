@@ -2,11 +2,13 @@
 
 mod api;
 mod auth;
+mod cli;
 mod config;
 mod tools;
 
 use std::sync::Arc;
 use anyhow::Result;
+use clap::Parser;
 use tracing::{info, warn};
 
 use legion_cluster::{bootstrap::run_bootstrap, membership::start_membership, node::ClusterNode, BootstrapOutcome};
@@ -27,6 +29,15 @@ use tools::BuiltinToolRegistry;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let command = cli::Cli::parse();
+    if matches!(&command.command, Some(cli::Command::Serve) | None) {
+        run_server().await
+    } else {
+        cli::run(command).await
+    }
+}
+
+async fn run_server() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

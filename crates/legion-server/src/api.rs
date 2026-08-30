@@ -25,7 +25,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use legion_core::traits::{AgentLoopTrait, EventStore};
-use legion_core::types::{Budget, ExternalEvent, RunConfig};
+use legion_core::types::{Budget, ExternalEvent, RunConfig, SessionFilter};
 use legion_deploy::{DeployJob, DeployPipeline};
 use legion_loop::driver::LegionLoop;
 use legion_namespace::Namespace;
@@ -83,6 +83,32 @@ struct SendMessageRequest {
 
 async fn health() -> Json<Value> {
     Json(json!({ "ok": true, "version": env!("CARGO_PKG_VERSION") }))
+}
+
+async fn list_sessions(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(filter): axum::extract::Query<SessionFilter>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let sessions = state.store.list_sessions(filter).await
+        .map_err(|e| server_error(e.to_string()))?;
+    Ok(Json(json!({ "sessions": sessions })))
+}
+
+async fn cluster_peers(
+    State(state): State<Arc<AppState>>,
+) -> Json<Value> {
+    let self_node = state.namespace.get("/cluster/self").await.and_then(|node| {
+        if let legion_namespace::NodeKind::Json(value) = node.kind { Some(value) } else { None }
+    });
+    let mut peers = Vec::new();
+    for name in state.namespace.ls("/cluster/peers").await {
+        if let Some(node) = state.namespace.get(&format!("/cluster/peers/{name}")).await {
+            if let legion_namespace::NodeKind::Json(value) = node.kind {
+                peers.push(value);
+            }
+        }
+    }
+    Json(json!({ "self": self_node, "peers": peers }))
 }
 
 async fn create_session(
@@ -374,7 +400,8 @@ pub async fn serve(state: Arc<AppState>, addr: String, api_key: Option<String>) 
 
     let app = Router::new()
         .route("/health",                          get(health))
-        .route("/sessions",                        post(create_session))
+        .route("/cluster/peers",                   get(cluster_peers))
+        .route("/sessions",                        get(list_sessions).post(create_session))
         .route("/sessions/{id}",                   get(get_session))
         .route("/sessions/{id}/log",               get(get_log))
         .route("/sessions/{id}/messages",          post(send_message))

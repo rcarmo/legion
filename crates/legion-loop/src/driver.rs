@@ -106,7 +106,6 @@ impl LegionLoop {
         let mut tool_calls: Vec<(String, String, serde_json::Value)> = vec![]; // (id, name, args)
         let mut tokens_in: u32  = 0;
         let mut tokens_out: u32 = 0;
-        let mut final_message   = None;
 
         while let Some(event) = stream.next().await {
             match event {
@@ -155,7 +154,6 @@ impl LegionLoop {
                             text_buf.push_str(text);
                         }
                     }
-                    final_message = Some(message);
                     break;
                 }
 

@@ -1,7 +1,7 @@
 //! Crash-recovery logic: replay a committed log and determine where to resume.
 
 use legion_core::{
-    error::{LegionError, Result},
+    error::Result,
     traits::EventStore,
     types::{RunId, SessionStatus, TurnEnvelope, TurnEventKind},
 };

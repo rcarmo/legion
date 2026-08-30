@@ -1,4 +1,4 @@
-.PHONY: build test lint check clean fmt docs integration-test
+.PHONY: build test lint check clean fmt docs integration-test cli-integration-test wasm-integration-test
 
 build:
 	cargo build --workspace
@@ -55,6 +55,19 @@ test-cluster:
 integration-test: build
 	@echo "==> Legion integration test"
 	@./tests/integration/run.sh
+
+cli-integration-test: server
+	@echo "==> Legion CLI integration test"
+	@./tests/integration/cli.sh
+
+wasm-integration-test: server
+	@echo "==> Legion WASM integration test"
+	@cd tests/fixtures/wasm-hello && cargo build --release --target wasm32-wasip1
+	@PORT=$${LEGION_TEST_PORT:-18090}; DATA=$$(mktemp -d); LOG=$$(mktemp); \
+	 LEGION_API_PORT=$$PORT LEGION_DATA_DIR=$$DATA RUST_LOG=error ./target/debug/legion serve >$$LOG 2>&1 & PID=$$!; \
+	 trap 'kill $$PID 2>/dev/null || true; rm -rf $$DATA $$LOG' EXIT; \
+	 for _ in $$(seq 1 50); do curl -sf http://127.0.0.1:$$PORT/health >/dev/null && break; sleep .2; done; \
+	 ./tests/integration/wasm_smoke.sh $$PORT
 
 # Build the server binary only
 server:

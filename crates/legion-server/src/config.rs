@@ -1,6 +1,5 @@
 //! Server configuration loaded from `legion.toml`.
 
-use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use anyhow::Result;
 
@@ -73,22 +72,4 @@ impl ServerConfig {
         Ok(toml::from_str(&raw)?)
     }
 
-    /// Write a starter config file with commented defaults.
-    pub fn write_example(path: &str) -> Result<()> {
-        let example = r#"# Legion server configuration
-
-[cluster]
-data_dir  = "/var/lib/legion"
-api_port  = 8080
-mdns      = true
-
-[model]
-# Provider/model string passed to rs-ai.
-# API keys are loaded from env: ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.
-default_model = "anthropic/claude-haiku-3-5"
-system_prompt = "You are a Legion cluster agent."
-"#;
-        std::fs::write(path, example)?;
-        Ok(())
-    }
 }

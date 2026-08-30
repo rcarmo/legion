@@ -44,6 +44,8 @@ rs-ai = { path = "../../rs-ai", default-features = false }
 # HTTP
 axum       = "0.8"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
+reqwest    = { version = "0.13", default-features = false, features = ["json", "query", "rustls"] }
+clap       = { version = "4", features = ["derive", "env"] }
 
 # Storage – single-node
 rusqlite = { version = "0.40", features = ["bundled"] }

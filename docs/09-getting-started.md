@@ -17,18 +17,17 @@ cd legion
 make build
 ```
 
-This produces a single binary: `target/release/legion-server`
+This produces a single binary: `target/release/legion`. With no command (or with `serve`) it runs the daemon; the other subcommands are REST clients.
 
 ## Single-Node Quick Start
 
 ```bash
 # Generate a node keypair and start
-legion-server --data-dir ~/.local/share/legion --listen 0.0.0.0:7777
+LEGION_DATA_DIR=~/.local/share/legion target/release/legion serve
 
 # In another terminal, check status
-9p read /cluster/self      # requires plan9port
-# or
-curl http://localhost:8080/cluster/self  # REST API
+target/release/legion health
+target/release/legion cluster peers
 ```
 
 The server starts, generates a keypair, creates a single-node Raft cluster, and advertises itself via mDNS.
@@ -42,14 +41,8 @@ const input = JSON.parse(await Bun.stdin.text());
 process.stdout.write(JSON.stringify({ greeting: `Hello, ${input.name}!` }));
 EOF
 
-# Build it
-bun build --target=bun hello.ts --outfile hello.js
-
 # Deploy it
-legion deploy push hello.js
-# → CID: bafkrei...
-
-legion deploy register --name hello --cid bafkrei... --runtime bun
+legion deploy push hello hello.ts --runtime bun
 
 # Invoke it
 echo '{"name": "World"}' | legion call hello
@@ -85,8 +78,7 @@ pub fn run(input: Json<Input>) -> FnResult<Json<Output>> {
 EOF
 
 cargo build --release --target wasm32-wasip1
-legion deploy push target/wasm32-wasip1/release/hello_wasm.wasm
-legion deploy register --name hello-wasm --cid bafkrei... --runtime wasm
+legion deploy push hello-wasm target/wasm32-wasip1/release/hello_wasm.wasm --runtime wasm
 echo '{"name":"World"}' | legion call hello-wasm
 ```
 
@@ -97,14 +89,15 @@ echo '{"name":"World"}' | legion call hello-wasm
 export ANTHROPIC_API_KEY=sk-ant-...
 
 # Start a session
-RUN=$(echo '{"model":"anthropic/claude-opus-4-5","system":"You are helpful"}' \
-  | legion session new)
+RUN=$(legion session new \
+  --model anthropic/claude-opus-4-5 \
+  --system-prompt "You are helpful" | jq -r .id)
 
 # Send a message
 legion session send $RUN "What is the capital of Portugal?"
 
-# Wait for and stream the response
-legion session stream $RUN
+# Or stream a new message as SSE
+legion session stream $RUN "What is the capital of Portugal?"
 
 # View full turn history
 legion session history $RUN
@@ -173,20 +166,22 @@ enabled        = false
 
 ## REST API
 
-Legion also exposes a REST API on port 8080 for clients that cannot speak 9P:
+Legion exposes a REST API on port 8080 for the bundled CLI and other clients:
 
 ```
-GET  /cluster/peers
-GET  /cluster/health
-GET  /sessions                        # list sessions
-POST /sessions                        # create session
-POST /sessions/{id}/turns             # append turn
-GET  /sessions/{id}/turns             # stream turns (SSE)
-GET  /sessions/{id}/status
-POST /fn/{name}                       # invoke function
-GET  /fn                              # list functions
-POST /deploy/push                     # push blob (multipart)
-POST /deploy/register                 # register function
+GET    /health
+GET    /cluster/peers
+GET    /sessions                       # list/filter sessions
+POST   /sessions                       # create session
+GET    /sessions/{id}                  # session status
+POST   /sessions/{id}/messages         # send and resolve
+GET    /sessions/{id}/stream           # resolve via SSE
+GET    /sessions/{id}/log              # event history
+POST   /sessions/{id}/events           # external trigger
+GET    /functions                      # list functions
+POST   /functions                      # deploy Bun source or base64 WASM
+DELETE /functions/{name}
+POST   /functions/{name}/invoke
 ```
 
 ## Useful Commands
@@ -200,9 +195,9 @@ legion session list      # list sessions
 legion session new       # create session
 legion session send      # send user message
 legion session history   # view turn history
-legion deploy push       # push function blob
-legion deploy register   # register function
+legion deploy push <name> <path> --runtime bun|wasm
 legion deploy list       # list functions
+legion deploy delete     # remove a function
 legion call <name>       # invoke function (stdin/stdout)
 ```
 

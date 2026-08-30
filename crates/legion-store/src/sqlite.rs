@@ -91,11 +91,11 @@ impl EventStore for SqliteStore {
         }
 
         // Get current log tail
-        let (seq, prev_hash): (SeqNum, Vec<u8>) = conn
+        let seq: SeqNum = conn
             .query_row(
-                "SELECT COALESCE(MAX(seq) + 1, 0), '' FROM turns WHERE run_id = ?1",
+                "SELECT COALESCE(MAX(seq) + 1, 0) FROM turns WHERE run_id = ?1",
                 params![run_str],
-                |row| Ok((row.get::<_, i64>(0)? as SeqNum, vec![])),
+                |row| Ok(row.get::<_, i64>(0)? as SeqNum),
             )
             .map_err(|e| LegionError::Store(e.to_string()))?;
 
@@ -254,16 +254,20 @@ impl EventStore for SqliteStore {
         let conn    = self.conn.lock().await;
         let limit   = filter.limit.unwrap_or(50) as i64;
         let offset  = filter.offset.unwrap_or(0) as i64;
+        let status  = filter.status;
 
         let mut stmt = conn.prepare(
             "SELECT s.run_id, s.status, s.config, s.created_at, s.updated_at,
                     (SELECT COUNT(*) FROM turns t WHERE t.run_id = s.run_id) AS turns
              FROM sessions s
+             WHERE ?3 IS NULL
+                OR (json_valid(s.status) AND json_extract(s.status, '$.status') = ?3)
+                OR s.status = ?3
              ORDER BY s.created_at DESC
              LIMIT ?1 OFFSET ?2",
         ).map_err(|e| LegionError::Store(e.to_string()))?;
 
-        let rows = stmt.query_map(params![limit, offset], |row| {
+        let rows = stmt.query_map(params![limit, offset, status], |row| {
             let run_id_str: String = row.get(0)?;
             let status_json: String = row.get(1)?;
             let config_json: String = row.get(2)?;
@@ -505,11 +509,22 @@ mod tests {
     #[tokio::test]
     async fn sqlite_store_list_sessions() {
         let store = SqliteStore::open_in_memory().unwrap();
+        let mut ids = Vec::new();
         for _ in 0..3 {
             let id = Uuid::new_v4();
             store.create_session(id, &config()).await.unwrap();
+            ids.push(id);
         }
+        store.set_status(ids[0], SessionStatus::Completed).await.unwrap();
+
         let sessions = store.list_sessions(SessionFilter::default()).await.unwrap();
         assert_eq!(sessions.len(), 3);
+
+        let completed = store.list_sessions(SessionFilter {
+            status: Some("completed".into()),
+            ..Default::default()
+        }).await.unwrap();
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].run_id, ids[0]);
     }
 }
