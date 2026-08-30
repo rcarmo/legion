@@ -1,6 +1,6 @@
 # Networking & Discovery
 
-Legion uses iroh as its P2P transport layer, with mDNS/Bonjour for LAN bootstrapping and an optional DHT path for WAN connectivity.
+Legion uses iroh as its P2P transport layer, with mDNS/Bonjour for LAN bootstrapping and an optional DHT path for WAN connectivity. iron is far too cool not to be used more broadly, but I actually resisted adding it (largely because I am not a big fan of DHTs) until I realized I could get mDNS/Bonjour peer discovery as a first step.
 
 ## Core Principle: Identity Is a Keypair
 
