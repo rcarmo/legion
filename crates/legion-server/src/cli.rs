@@ -62,6 +62,12 @@ pub enum SessionCommand {
     Send { id: String, message: String },
     History { id: String },
     Stream { id: String, message: Option<String> },
+    /// Resolve a dangling tool call after a crash.
+    Reconcile {
+        id: String,
+        #[arg(long, value_enum)]
+        action: ReconcileActionArg,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -96,6 +102,12 @@ pub enum DeployCommand {
 pub enum RuntimeArg {
     Bun,
     Wasm,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ReconcileActionArg {
+    Skip,
+    Retry,
 }
 
 #[derive(Debug, Args)]
@@ -181,6 +193,17 @@ async fn run_session(client: &ApiClient, command: &SessionCommand) -> Result<()>
         }
         SessionCommand::Stream { id, message } => {
             client.stream_session(id, message.as_deref()).await?;
+        }
+        SessionCommand::Reconcile { id, action } => {
+            let action = match action {
+                ReconcileActionArg::Skip => "skip",
+                ReconcileActionArg::Retry => "retry",
+            };
+            print_json(client.json(
+                Method::POST,
+                &format!("/sessions/{id}/reconcile"),
+                Some(json!({ "action": action })),
+            ).await?);
         }
     }
     Ok(())

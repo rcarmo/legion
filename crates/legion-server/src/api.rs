@@ -27,7 +27,7 @@ use uuid::Uuid;
 use legion_core::traits::{AgentLoopTrait, EventStore};
 use legion_core::types::{Budget, ExternalEvent, RunConfig, SessionFilter};
 use legion_deploy::{DeployJob, DeployPipeline};
-use legion_loop::driver::LegionLoop;
+use legion_loop::driver::{LegionLoop, ReconcileAction};
 use legion_namespace::Namespace;
 use legion_runtime::{invoke::{InvokeRequest, Invoker}, manifest::FunctionRuntime};
 
@@ -77,6 +77,11 @@ struct DeployRequest {
 #[derive(Debug, Deserialize)]
 struct SendMessageRequest {
     content: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReconcileRequest {
+    action: String,
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -308,6 +313,27 @@ async fn stream_session(
         .keep_alive(axum::response::sse::KeepAlive::default())
 }
 
+async fn reconcile_session(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+    Json(request): Json<ReconcileRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let action = match request.action.as_str() {
+        "skip" => ReconcileAction::Skip,
+        "retry" => ReconcileAction::Retry,
+        _ => return Err((StatusCode::BAD_REQUEST, Json(json!({
+            "error": "action must be 'skip' or 'retry'"
+        })))),
+    };
+    state.lp.reconcile(id, action).await
+        .map_err(|e| (StatusCode::CONFLICT, Json(json!({ "error": e.to_string() }))))?;
+    Ok(Json(json!({
+        "id": id,
+        "action": request.action,
+        "status": "idle"
+    })))
+}
+
 async fn invoke_function(
     State(state): State<Arc<AppState>>,
     Path(name):   Path<String>,
@@ -407,6 +433,7 @@ pub async fn serve(state: Arc<AppState>, addr: String, api_key: Option<String>) 
         .route("/sessions/{id}/messages",          post(send_message))
         .route("/sessions/{id}/stream",            get(stream_session))
         .route("/sessions/{id}/events",            post(session_webhook))
+        .route("/sessions/{id}/reconcile",         post(reconcile_session))
         .route("/functions",                       get(list_functions).post(deploy_function))
         .route("/functions/{name}",                axum::routing::delete(delete_function))
         .route("/functions/{name}/invoke",         post(invoke_function))

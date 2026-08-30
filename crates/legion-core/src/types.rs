@@ -176,6 +176,7 @@ pub enum TurnEventKind {
     // Completions
     AssistantMessage,
     ToolResult       { call_id: String },
+    ToolCallReconciled { call_id: String, action: String },
     // Session lifecycle
     SessionStarted,
     SessionForked    { parent_run_id: RunId, at_seq: SeqNum },
@@ -227,14 +228,19 @@ impl TurnEvent {
         }
     }
 
-    pub fn tool_call_intent(tool_name: impl Into<String>, call_id: impl Into<String>, effect: EffectClass) -> Self {
+    pub fn tool_call_intent(
+        tool_name: impl Into<String>,
+        call_id: impl Into<String>,
+        effect: EffectClass,
+        arguments: serde_json::Value,
+    ) -> Self {
         Self {
             kind: TurnEventKind::ToolCallIntent {
                 tool_name: tool_name.into(),
                 call_id:   call_id.into(),
                 effect,
             },
-            payload:     None,
+            payload:     Some(serde_json::json!({ "arguments": arguments })),
             payload_cid: None,
             model:       None,
             tokens_in:   None,
@@ -252,6 +258,23 @@ impl TurnEvent {
             tokens_in:   None,
             tokens_out:  None,
             wall_ms:     None,
+        }
+    }
+
+    pub fn tool_call_reconciled(call_id: impl Into<String>, action: impl Into<String>) -> Self {
+        let call_id = call_id.into();
+        let action = action.into();
+        Self {
+            kind: TurnEventKind::ToolCallReconciled {
+                call_id: call_id.clone(),
+                action: action.clone(),
+            },
+            payload: Some(serde_json::json!({ "call_id": call_id, "action": action })),
+            payload_cid: None,
+            model: None,
+            tokens_in: None,
+            tokens_out: None,
+            wall_ms: None,
         }
     }
 

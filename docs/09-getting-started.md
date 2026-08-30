@@ -178,6 +178,7 @@ POST   /sessions/{id}/messages         # send and resolve
 GET    /sessions/{id}/stream           # resolve via SSE
 GET    /sessions/{id}/log              # event history
 POST   /sessions/{id}/events           # external trigger
+POST   /sessions/{id}/reconcile        # skip/retry a dangling tool call
 GET    /functions                      # list functions
 POST   /functions                      # deploy Bun source or base64 WASM
 DELETE /functions/{name}
@@ -195,6 +196,7 @@ legion session list      # list sessions
 legion session new       # create session
 legion session send      # send user message
 legion session history   # view turn history
+legion session reconcile <id> --action skip|retry
 legion deploy push <name> <path> --runtime bun|wasm
 legion deploy list       # list functions
 legion deploy delete     # remove a function
@@ -209,4 +211,4 @@ legion call <name>       # invoke function (stdin/stdout)
 
 **Function fails silently**: Check `~/.local/share/legion/logs/` and look for budget exhaustion or WASM trap messages.
 
-**Session stuck in `pending_reconciliation`**: A write-ahead intent was logged but the tool result never arrived (crash mid-execution). Use `legion session reconcile <run-id>` to skip or replay the dangling entry.
+**Session stuck in `pending_reconciliation`**: A write-ahead intent was logged but the tool result never arrived (crash mid-execution). Use `legion session reconcile <run-id> --action skip` to record a synthetic skipped result, or `--action retry` to dispatch the stored arguments again. Legacy intents created before arguments were persisted can only be skipped.

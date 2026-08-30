@@ -30,6 +30,21 @@ use crate::recovery::{recover_session, RecoveryOutcome};
 
 use crate::stream::SessionEvent;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReconcileAction {
+    Skip,
+    Retry,
+}
+
+impl ReconcileAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Skip => "skip",
+            Self::Retry => "retry",
+        }
+    }
+}
+
 // ── LegionLoop ────────────────────────────────────────────────────────────────
 
 /// Stateless agent loop that drives sessions stored in an `EventStore`.
@@ -51,6 +66,58 @@ impl LegionLoop {
     pub fn with_context_window(mut self, n: usize) -> Self {
         self.context_window = n;
         self
+    }
+
+    /// Resolve the currently pending tool call after an operator decision.
+    /// A failed retry leaves the session pending so it can be reconciled again.
+    pub async fn reconcile(&self, run_id: RunId, action: ReconcileAction) -> Result<()> {
+        let status = self.store.session_status(run_id).await?;
+        let SessionStatus::PendingReconciliation { tool_name, call_id } = status else {
+            return Err(LegionError::SessionWrongState {
+                run_id,
+                expected: SessionStatus::PendingReconciliation {
+                    tool_name: "<tool>".into(),
+                    call_id: "<call>".into(),
+                },
+                actual: status,
+            });
+        };
+
+        let log = self.store.read_log(run_id).await?;
+        let intent = log.iter().rev().find(|entry| {
+            matches!(
+                &entry.event.kind,
+                TurnEventKind::ToolCallIntent { call_id: id, .. } if id == &call_id
+            )
+        }).ok_or_else(|| LegionError::Store(format!(
+            "pending tool intent not found for call {call_id}"
+        )))?;
+
+        match action {
+            ReconcileAction::Skip => {
+                self.store.append(run_id, TurnEvent::tool_result(
+                    &call_id,
+                    serde_json::json!({ "skipped": true, "reconciled": true }),
+                )).await?;
+            }
+            ReconcileAction::Retry => {
+                let arguments = intent.event.payload.as_ref()
+                    .and_then(|payload| payload.get("arguments"))
+                    .cloned()
+                    .ok_or_else(|| LegionError::ToolError(
+                        "cannot retry legacy tool intent without stored arguments".into(),
+                    ))?;
+                let result = self.tools.dispatch(&tool_name, arguments).await?;
+                self.store.append(run_id, TurnEvent::tool_result(&call_id, result)).await?;
+            }
+        }
+
+        self.store.append(run_id, TurnEvent::tool_call_reconciled(
+            &call_id,
+            action.as_str(),
+        )).await?;
+        self.store.set_status(run_id, SessionStatus::Idle).await?;
+        Ok(())
     }
 
     /// Run one full turn: build context → call LLM → dispatch tools → commit.
@@ -179,7 +246,7 @@ impl LegionLoop {
             // Write-ahead intent
             self.store.append(
                 run_id,
-                TurnEvent::tool_call_intent(tool_name, call_id, effect.clone()),
+                TurnEvent::tool_call_intent(tool_name, call_id, effect.clone(), args.clone()),
             ).await?;
             self.store.set_status(run_id, SessionStatus::ToolPending).await?;
 
@@ -385,6 +452,59 @@ mod tests {
         let recent = lp.store.read_recent(run_id, 5).await.unwrap();
         let has_user_msg = recent.iter().any(|e| matches!(e.event.kind, TurnEventKind::UserMessage));
         assert!(has_user_msg, "expected a UserMessage turn after resume");
+    }
+
+    #[tokio::test]
+    async fn reconcile_skip_closes_dangling_call() {
+        let store = Arc::new(MemoryEventStore::new());
+        let lp = LegionLoop::new(store.clone(), Arc::new(EchoToolRegistry::new()));
+        let run_id = lp.start(RunConfig {
+            system_prompt: None,
+            model: "faux/test".into(),
+            budget: Budget::default(),
+            tools: vec!["echo".into()],
+            metadata: None,
+        }).await.unwrap();
+        store.append(run_id, TurnEvent::tool_call_intent(
+            "echo", "call-1", EffectClass::Write, serde_json::json!({"message":"hello"}),
+        )).await.unwrap();
+        lp.recover(run_id).await.unwrap_err();
+
+        lp.reconcile(run_id, ReconcileAction::Skip).await.unwrap();
+
+        assert_eq!(store.session_status(run_id).await.unwrap(), SessionStatus::Idle);
+        let log = store.read_log(run_id).await.unwrap();
+        assert!(log.iter().any(|entry| matches!(
+            &entry.event.kind,
+            TurnEventKind::ToolCallReconciled { call_id, action }
+                if call_id == "call-1" && action == "skip"
+        )));
+    }
+
+    #[tokio::test]
+    async fn reconcile_retry_dispatches_stored_arguments() {
+        let store = Arc::new(MemoryEventStore::new());
+        let lp = LegionLoop::new(store.clone(), Arc::new(EchoToolRegistry::new()));
+        let run_id = lp.start(RunConfig {
+            system_prompt: None,
+            model: "faux/test".into(),
+            budget: Budget::default(),
+            tools: vec!["echo".into()],
+            metadata: None,
+        }).await.unwrap();
+        store.append(run_id, TurnEvent::tool_call_intent(
+            "echo", "call-2", EffectClass::Idempotent, serde_json::json!({"message":"again"}),
+        )).await.unwrap();
+        lp.recover(run_id).await.unwrap_err();
+
+        lp.reconcile(run_id, ReconcileAction::Retry).await.unwrap();
+
+        let log = store.read_log(run_id).await.unwrap();
+        let result = log.iter().find(|entry| matches!(
+            &entry.event.kind,
+            TurnEventKind::ToolResult { call_id } if call_id == "call-2"
+        )).unwrap();
+        assert_eq!(result.event.payload.as_ref().unwrap()["message"], "again");
     }
 
     #[tokio::test]
