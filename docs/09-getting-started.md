@@ -129,40 +129,46 @@ Repeat on a third machine. The cluster is now fault-tolerant: any single node fa
 
 ## Configuration
 
-All configuration is in a TOML file (default: `~/.config/legion/config.toml`):
+The daemon reads `./legion.toml` by default. Set `LEGION_CONFIG` to an explicit path; unlike the optional default, an unreadable or invalid explicit file is fatal.
 
 ```toml
-[node]
-data_dir       = "~/.local/share/legion"
-keypair_path   = "~/.config/legion/keypair"
+# Optional API authentication; prefer LEGION_API_KEY in the environment.
+# api_key = "replace-me"
 
-[listen]
-nine_p_addr    = "0.0.0.0:7777"
-api_addr       = "0.0.0.0:8080"
+# Distributed builds additionally accept top-level raft_peers,
+# raft_node_id, raft_secret, and raft_api_secret values here.
 
-[raft]
-heartbeat_ms         = 200
-election_timeout_ms  = 1000
+[cluster]
+data_dir = "/var/lib/legion"
+bind_addr = "0.0.0.0:0"
+api_port = 8080
+mdns = true
 
-[discovery]
-mdns   = true   # LAN discovery (default on)
-dht    = false  # BitTorrent DHT (for WAN peers)
+[model]
+default_model = "anthropic/claude-haiku-3-5"
+system_prompt = "You are a Legion cluster agent."
 
-[blobs]
-cache_dir      = "~/.local/share/legion/blobs"
-cache_max_gb   = 10
-cache_ttl_days = 30
-
-[runtime]
-bun_path       = "/home/agent/.bun/bin/bun"
-max_memory_mb  = 512
-max_wall_ms    = 30000
-
-[backup]
-enabled        = false
-# s3_bucket   = "my-legion-backup"
-# s3_prefix   = "legion/"
+[invocation]
+timeout_ms = 30000
+max_input_bytes = 1048576
+max_output_bytes = 4194304
+max_concurrent_per_function = 8
 ```
+
+The packaged systemd unit sets `LEGION_CONFIG=/etc/legion/legion.toml` and loads secrets from `/etc/legion/legion.env`.
+
+## systemd Installation
+
+Build and install a dedicated `legion` service account, hardened unit, configuration, and environment template:
+
+```bash
+cargo build -p legion-server --release
+sudo ENABLE=1 make install
+systemctl status legion.service
+journalctl -u legion.service -f
+```
+
+`make install` preserves existing files under `/etc/legion`. `make uninstall` removes the binary and unit but deliberately preserves `/etc/legion` and `/var/lib/legion`. Use `DESTDIR=/tmp/legion-package make install` to stage a package without touching the host.
 
 ## REST API
 
@@ -189,8 +195,8 @@ GET    /metrics                        # Prometheus text metrics
 ## Useful Commands
 
 ```bash
-legion server start      # start the server
-legion server status     # check server status
+systemctl start legion   # start an installed daemon
+systemctl status legion  # inspect an installed daemon
 legion cluster peers     # list cluster peers
 legion cluster health    # health summary
 legion session list      # list sessions

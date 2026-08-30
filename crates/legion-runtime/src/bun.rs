@@ -99,12 +99,12 @@ impl Invoker for BunRuntime {
 }
 
 fn which_bun() -> PathBuf {
-    // Check common locations; fall back to PATH
-    for candidate in &[
-        "/home/agent/.bun/bin/bun",
-        "/usr/local/bin/bun",
-        "/usr/bin/bun",
-    ] {
+    if let Ok(path) = std::env::var("LEGION_BUN_BIN") {
+        return PathBuf::from(path);
+    }
+    // Prefer system-wide locations so the packaged service does not depend on
+    // a particular user's home directory; fall back to PATH for development.
+    for candidate in &["/usr/local/bin/bun", "/usr/bin/bun"] {
         if std::path::Path::new(candidate).exists() {
             return PathBuf::from(candidate);
         }

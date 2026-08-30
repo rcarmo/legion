@@ -1,4 +1,4 @@
-.PHONY: build test lint check clean fmt docs integration-test cli-integration-test wasm-integration-test
+.PHONY: build test lint check clean fmt docs integration-test cli-integration-test wasm-integration-test install uninstall
 
 build:
 	cargo build --workspace
@@ -72,3 +72,10 @@ wasm-integration-test: server
 # Build the server binary only
 server:
 	cargo build -p legion-server
+
+# Stage with DESTDIR=/tmp/pkg; set ENABLE=1 for a live systemd installation.
+install:
+	BINARY=target/release/legion ./contrib/systemd/install.sh
+
+uninstall:
+	./contrib/systemd/uninstall.sh

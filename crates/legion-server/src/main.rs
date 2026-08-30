@@ -7,7 +7,7 @@ mod config;
 mod tools;
 
 use std::sync::Arc;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use tracing::{info, warn};
 
@@ -63,10 +63,18 @@ async fn run_server() -> Result<()> {
         .init();
 
     // ── Config ───────────────────────────────────────────────────────────────
-    let mut cfg = ServerConfig::load("legion.toml").unwrap_or_else(|_| {
-        warn!("no legion.toml found; using defaults");
-        ServerConfig::default()
-    });
+    let explicit_config = std::env::var("LEGION_CONFIG").ok();
+    let config_path = explicit_config.as_deref().unwrap_or("legion.toml");
+    let mut cfg = match ServerConfig::load(config_path) {
+        Ok(config) => config,
+        Err(error) if explicit_config.is_some() => {
+            return Err(error).with_context(|| format!("load LEGION_CONFIG from {config_path}"));
+        }
+        Err(error) => {
+            warn!(path = %config_path, %error, "configuration unavailable; using defaults");
+            ServerConfig::default()
+        }
+    };
 
     // Allow env overrides (useful for testing/CI)
     if let Ok(port) = std::env::var("LEGION_API_PORT") {

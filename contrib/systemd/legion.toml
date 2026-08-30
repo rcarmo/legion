@@ -1,0 +1,21 @@
+# Legion daemon configuration for the packaged systemd service.
+# Prefer LEGION_API_KEY in legion.env rather than putting secrets here.
+# api_key = "replace-with-a-long-random-token"
+# Distributed nodes additionally need top-level raft_peers, raft_node_id,
+# raft_secret, and raft_api_secret values here, before the table sections.
+
+[cluster]
+data_dir = "/var/lib/legion"
+bind_addr = "0.0.0.0:0"
+api_port = 8080
+mdns = true
+
+[model]
+default_model = "anthropic/claude-haiku-3-5"
+system_prompt = "You are a Legion cluster agent."
+
+[invocation]
+timeout_ms = 30000
+max_input_bytes = 1048576
+max_output_bytes = 4194304
+max_concurrent_per_function = 8

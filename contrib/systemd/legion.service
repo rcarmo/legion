@@ -1,0 +1,51 @@
+[Unit]
+Description=Legion durable agent and function node
+Documentation=https://github.com/rcarmo/legion
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=legion
+Group=legion
+WorkingDirectory=/etc/legion
+Environment=LEGION_CONFIG=/etc/legion/legion.toml
+EnvironmentFile=-/etc/legion/legion.env
+ExecStart=/usr/local/bin/legion serve
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+
+# StateDirectory creates /var/lib/legion with stable ownership before startup.
+StateDirectory=legion
+StateDirectoryMode=0750
+UMask=0027
+LimitNOFILE=65536
+TasksMax=4096
+
+# JIT runtimes need executable writable memory, so MemoryDenyWriteExecute is
+# deliberately omitted. Everything else remains read-only outside state/tmp.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictSUIDSGID=true
+LockPersonality=true
+RemoveIPC=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

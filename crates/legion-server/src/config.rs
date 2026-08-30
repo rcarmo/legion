@@ -75,5 +75,19 @@ impl ServerConfig {
         let raw = std::fs::read_to_string(path)?;
         Ok(toml::from_str(&raw)?)
     }
+}
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packaged_systemd_config_matches_schema() {
+        let config: ServerConfig = toml::from_str(include_str!(
+            "../../../contrib/systemd/legion.toml"
+        )).unwrap();
+        assert_eq!(config.cluster.data_dir.to_string_lossy(), "/var/lib/legion");
+        assert_eq!(config.cluster.api_port, 8080);
+        assert_eq!(config.invocation.timeout_ms, 30_000);
+    }
 }

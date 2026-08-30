@@ -269,7 +269,14 @@ fn read_json_input(argument: Option<&str>) -> Result<Value> {
 }
 
 fn print_json(value: Value) {
-    println!("{}", serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string()));
+    use std::io::Write;
+
+    let output = serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
+    if let Err(error) = writeln!(std::io::stdout().lock(), "{output}") {
+        if error.kind() != std::io::ErrorKind::BrokenPipe {
+            eprintln!("failed writing output: {error}");
+        }
+    }
 }
 
 struct ApiClient {
