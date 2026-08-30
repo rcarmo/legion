@@ -42,6 +42,9 @@ Running ◄───────────────────────
                                   └─────────────────────► Resuming → Running
 ```
 
+The inspiration for this came from `pi-ai`'s upcoming harness, but is simplified here because we have to start from someplace.
+
+
 ## Effect Classification
 
 Tool calls are classified before dispatch. This classification is stored in the `ToolCallIntent` event so replay can skip completed steps correctly.
