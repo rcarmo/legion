@@ -8,7 +8,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use tracing::{info, warn};
 
-use legion_cluster::{bootstrap::run_bootstrap, node::ClusterNode, BootstrapOutcome};
+use legion_cluster::{bootstrap::run_bootstrap, membership::start_membership, node::ClusterNode, BootstrapOutcome};
 use legion_core::ChainRegistry;
 use legion_deploy::DeployPipeline;
 use legion_loop::driver::LegionLoop;
@@ -31,10 +31,18 @@ async fn main() -> Result<()> {
         .init();
 
     // ── Config ───────────────────────────────────────────────────────────────
-    let cfg = ServerConfig::load("legion.toml").unwrap_or_else(|_| {
+    let mut cfg = ServerConfig::load("legion.toml").unwrap_or_else(|_| {
         warn!("no legion.toml found; using defaults");
         ServerConfig::default()
     });
+
+    // Allow env overrides (useful for testing/CI)
+    if let Ok(port) = std::env::var("LEGION_API_PORT") {
+        if let Ok(p) = port.parse::<u16>() { cfg.cluster.api_port = p; }
+    }
+    if let Ok(dir) = std::env::var("LEGION_DATA_DIR") {
+        cfg.cluster.data_dir = std::path::PathBuf::from(dir);
+    }
     info!(
         data_dir = %cfg.cluster.data_dir.display(),
         api_port = cfg.cluster.api_port,
@@ -63,12 +71,35 @@ async fn main() -> Result<()> {
 
     // ── Namespace ─────────────────────────────────────────────────────────────
     let namespace = Namespace::new();
-
-    // ── Seed /cluster/self in namespace ──────────────────────────────────────
     namespace.set_json("/cluster/self", serde_json::json!({
         "endpoint_id": node.endpoint_id().to_string(),
         "short_id":    node.short_id(),
     })).await;
+
+    // ── Gossip peer membership ─────────────────────────────────────────────────
+    let ns_peers = namespace.clone();
+    let _membership = start_membership(
+        &node,
+        move |p| {
+            let ns = ns_peers.clone();
+            tokio::spawn(async move {
+                ns.set_json(
+                    &format!("/cluster/peers/{}", p.short_id),
+                    serde_json::json!({
+                        "endpoint_id": p.endpoint_id,
+                        "short_id":    p.short_id,
+                        "api_port":    p.api_port,
+                        "last_seen":   p.timestamp,
+                    }),
+                ).await;
+            });
+        },
+        |eid| tracing::info!(%eid, "peer left cluster"),
+        std::time::Duration::from_secs(5),
+    ).await.unwrap_or_else(|e| {
+        warn!("gossip membership unavailable (solo mode): {e}");
+        legion_cluster::MembershipHandle::noop()
+    });
 
     // ── Deploy pipeline ───────────────────────────────────────────────────────
     let fn_root  = cfg.cluster.data_dir.join("fn");
@@ -76,7 +107,7 @@ async fn main() -> Result<()> {
 
     // ── Tool registries ───────────────────────────────────────────────────────
     let bun_runtime = Arc::new(BunRuntime { fn_root, ..Default::default() });
-    let bridge   = Arc::new(RegistryBridge::new(namespace.clone(), bun_runtime));
+    let bridge   = Arc::new(RegistryBridge::new(namespace.clone(), bun_runtime.clone()));
     let builtins = Arc::new(BuiltinToolRegistry::new(
         arc_store.clone(),
         node.clone(),
@@ -92,7 +123,7 @@ async fn main() -> Result<()> {
     info!("agent loop ready (model: {})", cfg.model.default_model);
 
     // ── REST API ──────────────────────────────────────────────────────────────
-    let state = Arc::new(AppState { store, lp, deployer, namespace });
+    let state = Arc::new(AppState { store, lp, deployer, namespace, invoker: bun_runtime as Arc<dyn legion_runtime::invoke::Invoker> });
     let addr  = format!("0.0.0.0:{}", cfg.cluster.api_port);
     api::serve(state, addr).await?;
     Ok(())

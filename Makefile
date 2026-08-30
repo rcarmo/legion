@@ -1,4 +1,4 @@
-.PHONY: build test lint check clean fmt docs
+.PHONY: build test lint check clean fmt docs integration-test
 
 build:
 	cargo build --workspace
@@ -28,9 +28,8 @@ docs:
 
 # Run a single-node server in dev mode
 dev:
-	RUST_LOG=legion=debug,hiqlite=info cargo run -p legion-server -- \
-		--data-dir /tmp/legion-dev \
-		--listen 0.0.0.0:7777
+	RUST_LOG=legion=debug,hiqlite=info \
+	cargo run -p legion-server
 
 # Run tests for a specific crate
 test-core:
@@ -41,3 +40,22 @@ test-store:
 
 test-loop:
 	cargo test -p legion-loop
+
+test-namespace:
+	cargo test -p legion-namespace
+
+test-deploy:
+	cargo test -p legion-deploy
+
+test-cluster:
+	cargo test -p legion-cluster -- --test-threads=1
+
+# Integration test: deploy a Bun function and invoke it directly via the REST API.
+# Requires: bun installed, LEGION_TEST_PORT available.
+integration-test: build
+	@echo "==> Legion integration test"
+	@./tests/integration/run.sh
+
+# Build the server binary only
+server:
+	cargo build -p legion-server

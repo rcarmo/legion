@@ -2,9 +2,11 @@ pub mod node;
 pub mod discovery;
 pub mod bonjour;
 pub mod bootstrap;
+pub mod membership;
 
 pub use node::{ClusterNode, NodeConfig, NodeIdentity};
 pub use bootstrap::BootstrapOutcome;
+pub use membership::{start_membership, MembershipHandle, NodePresence};
 
 #[cfg(test)]
 mod tests {

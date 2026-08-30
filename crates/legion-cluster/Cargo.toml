@@ -14,11 +14,14 @@ serde_json  = { workspace = true }
 thiserror   = { workspace = true }
 anyhow      = { workspace = true }
 tracing     = { workspace = true }
+chrono      = { workspace = true }
 futures     = { workspace = true }
 rand        = { workspace = true }
 iroh                     = { workspace = true }
 iroh-gossip              = { workspace = true }
 iroh-mdns-address-lookup = { workspace = true }
+bytes       = { workspace = true }
+blake3      = { workspace = true }
 mdns-sd                  = { workspace = true }
 
 [dev-dependencies]

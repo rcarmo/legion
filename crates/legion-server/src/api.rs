@@ -28,18 +28,19 @@ use legion_core::{
 };
 use legion_deploy::{DeployJob, DeployPipeline};
 use legion_loop::driver::LegionLoop;
-use legion_namespace::Namespace;
-use legion_runtime::manifest::FunctionRuntime;
+use legion_namespace::{Namespace, NodeKind};
+use legion_runtime::{invoke::{InvokeRequest, Invoker}, manifest::FunctionRuntime};
 use legion_store::SqliteStore;
 
 // ── AppState ──────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 pub struct AppState {
-    pub store:    SqliteStore,
-    pub lp:       Arc<LegionLoop>,
-    pub deployer: Arc<DeployPipeline>,
+    pub store:     SqliteStore,
+    pub lp:        Arc<LegionLoop>,
+    pub deployer:  Arc<DeployPipeline>,
     pub namespace: Namespace,
+    pub invoker:   Arc<dyn Invoker>,
 }
 
 // ── Request / response types ──────────────────────────────────────────────────
@@ -227,6 +228,66 @@ async fn delete_function(
     Ok(Json(json!({ "name": name, "deleted": true })))
 }
 
+async fn invoke_function(
+    State(state): State<Arc<AppState>>,
+    Path(name):   Path<String>,
+    Json(args):   Json<Value>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    // Check the function exists in namespace
+    let manifest_path = format!("/fn/{name}/manifest.json");
+    if state.namespace.get(&manifest_path).await.is_none() {
+        return Err(not_found(format!("function not found: {name}")));
+    }
+
+    let result = state.invoker.invoke(InvokeRequest {
+        function_name: name.clone(),
+        call_id:       uuid::Uuid::new_v4().to_string(),
+        args,
+    }).await.map_err(|e| server_error(e.to_string()))?;
+
+    if let Some(err) = result.error {
+        return Err((StatusCode::UNPROCESSABLE_ENTITY, Json(json!({
+            "function": name,
+            "error":    err,
+            "wall_ms":  result.wall_ms,
+        }))));
+    }
+
+    Ok(Json(json!({
+        "function": name,
+        "output":   result.output,
+        "wall_ms":  result.wall_ms,
+    })))
+}
+
+/// POST /sessions/:id/events — inject an external trigger to resume a parked session.
+async fn session_webhook(
+    State(state): State<Arc<AppState>>,
+    Path(id):     Path<Uuid>,
+    Json(body):   Json<Value>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    use legion_core::traits::AgentLoopTrait;
+
+    let trigger_name = body.get("trigger")
+        .and_then(|v| v.as_str())
+        .unwrap_or("webhook")
+        .to_string();
+    let payload = body.get("payload").cloned().unwrap_or(Value::Null);
+
+    state.lp.resume(id, ExternalEvent::ExternalTrigger {
+        name:    trigger_name.clone(),
+        payload: payload.clone(),
+    }).await.map_err(|e| server_error(e.to_string()))?;
+
+    info!(run_id = %id, trigger = %trigger_name, "external event injected");
+
+    Ok(Json(json!({
+        "id":      id.to_string(),
+        "trigger": trigger_name,
+        "status":  "resuming",
+    })))
+}
+
 fn server_error(msg: String) -> (StatusCode, Json<Value>) {
     (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": msg })))
 }
@@ -238,13 +299,15 @@ fn not_found(msg: String) -> (StatusCode, Json<Value>) {
 
 pub async fn serve(state: Arc<AppState>, addr: String) -> Result<()> {
     let app = Router::new()
-        .route("/health",                get(health))
-        .route("/sessions",              post(create_session))
-        .route("/sessions/:id",          get(get_session))
-        .route("/sessions/:id/log",      get(get_log))
-        .route("/sessions/:id/messages", post(send_message))
-        .route("/functions",             get(list_functions).post(deploy_function))
-        .route("/functions/:name",       axum::routing::delete(delete_function))
+        .route("/health",                        get(health))
+        .route("/sessions",                      post(create_session))
+        .route("/sessions/:id",                  get(get_session))
+        .route("/sessions/:id/log",              get(get_log))
+        .route("/sessions/:id/messages",         post(send_message))
+        .route("/sessions/:id/events",           post(session_webhook))
+        .route("/functions",                     get(list_functions).post(deploy_function))
+        .route("/functions/:name",               axum::routing::delete(delete_function))
+        .route("/functions/:name/invoke",        post(invoke_function))
         .with_state(state)
         .layer(tower_http::trace::TraceLayer::new_for_http());
 
