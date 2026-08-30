@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hiqlite::{params, Client, Node, NodeConfig};
+use hiqlite::{macros::params, Client, Node, NodeConfig};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -24,10 +24,10 @@ use legion_core::{
 struct TurnRow {
     seq:        i64,
     prev_hash:  Vec<u8>,
-    hash:       Vec<u8>,
-    kind:       String,
-    payload:    Option<String>,
-    model:      Option<String>,
+    kind:        String,
+    payload:     Option<String>,
+    payload_cid: Option<String>,
+    model:       Option<String>,
     tokens_in:  Option<i64>,
     tokens_out: Option<i64>,
     wall_ms:    Option<i64>,
@@ -39,10 +39,10 @@ impl From<&mut hiqlite::Row<'_>> for TurnRow {
         Self {
             seq:        row.get("seq"),
             prev_hash:  row.get("prev_hash"),
-            hash:       row.get("hash"),
-            kind:       row.get("kind"),
-            payload:    row.get("payload"),
-            model:      row.get("model"),
+            kind:        row.get("kind"),
+            payload:     row.get("payload"),
+            payload_cid: row.get("payload_cid"),
+            model:       row.get("model"),
             tokens_in:  row.get("tokens_in"),
             tokens_out: row.get("tokens_out"),
             wall_ms:    row.get("wall_ms"),
@@ -84,9 +84,10 @@ pub struct HiqliteStore {
 
 impl HiqliteStore {
     /// Start a single-node hiqlite instance (development / test mode).
-    pub async fn start_single(data_dir: &Path) -> anyhow::Result<Self> {
+    pub async fn start_single(data_dir: &Path) -> Result<Self> {
         let data_str = data_dir.to_string_lossy().to_string();
-        std::fs::create_dir_all(data_dir)?;
+        std::fs::create_dir_all(data_dir)
+            .map_err(|e| LegionError::Store(format!("create hiqlite data dir: {e}")))?;
 
         let config = NodeConfig {
             node_id: 1,
@@ -101,47 +102,69 @@ impl HiqliteStore {
             ..Default::default()
         };
 
-        let client = hiqlite::start_node(config).await?;
-        client.wait_until_healthy().await;
+        Self::connect(config).await
+    }
 
-        // Apply schema
-        for stmt in schema_stmts() {
-            let _ = client.execute(stmt, params!()).await;
-        }
-
+    /// Start this node and connect it to the configured hiqlite cluster.
+    pub async fn connect(config: NodeConfig) -> Result<Self> {
+        let client = hiqlite::start_node(config).await
+            .map_err(|e| LegionError::Store(format!("start hiqlite node: {e}")))?;
+        client.wait_until_healthy_db().await;
+        apply_schema(&client).await?;
         Ok(Self { client: Arc::new(client) })
     }
 
-    /// Connect to an already-started node (e.g. in multi-node setup).
+    /// Wrap an already-started client. The caller is responsible for schema setup.
     pub fn from_client(client: Client) -> Self {
         Self { client: Arc::new(client) }
     }
 }
 
-fn schema_stmts() -> Vec<&'static str> {
-    vec![
+async fn apply_schema(client: &Client) -> Result<()> {
+    for migration in [
         include_str!("migrations/0001_initial.sql"),
         include_str!("migrations/0002_functions.sql"),
-    ]
+    ] {
+        // The shared migrations predate distributed mode. Make their DDL
+        // idempotent so every Raft node may safely initialize an existing DB.
+        let sql = migration
+            .replace("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ")
+            .replace("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ");
+        let results = client.batch(sql).await
+            .map_err(|e| LegionError::Store(format!("apply hiqlite schema: {e}")))?;
+        for result in results {
+            result.map_err(|e| LegionError::Store(format!("apply hiqlite schema: {e}")))?;
+        }
+    }
+    Ok(())
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-fn hash_content(
-    seq:        u64,
-    prev_hash:  &[u8; 32],
-    event:      &TurnEvent,
-    created_at: i64,
-) -> [u8; 32] {
+fn hash_envelope(envelope: &TurnEnvelope) -> [u8; 32] {
     let content = serde_json::json!({
-        "seq":        seq,
-        "prev_hash":  prev_hash,
-        "event":      event,
-        "created_at": created_at,
+        "seq":        envelope.seq,
+        "prev_hash":  envelope.prev_hash,
+        "event":      envelope.event,
+        "created_at": envelope.created_at,
     });
-    let mut h = Sha256::new();
-    h.update(serde_json::to_vec(&content).unwrap_or_default());
-    h.finalize().into()
+    let mut hasher = Sha256::new();
+    hasher.update(serde_json::to_vec(&content).unwrap_or_default());
+    hasher.finalize().into()
+}
+
+fn verify_chain(log: &[TurnEnvelope], run_id: RunId) -> Result<()> {
+    for (index, envelope) in log.iter().enumerate() {
+        let expected = if index == 0 {
+            [0u8; 32]
+        } else {
+            hash_envelope(&log[index - 1])
+        };
+        if envelope.prev_hash != expected {
+            return Err(LegionError::TamperEvident(run_id, envelope.seq));
+        }
+    }
+    Ok(())
 }
 
 fn now_ms() -> i64 { chrono::Utc::now().timestamp_millis() }
@@ -153,7 +176,7 @@ fn turn_row_to_envelope(run_id: RunId, r: TurnRow) -> TurnEnvelope {
     let event = TurnEvent {
         kind:        serde_json::from_str(&r.kind).unwrap_or(TurnEventKind::SessionStarted),
         payload:     payload_val,
-        payload_cid: None,
+        payload_cid: r.payload_cid,
         model:       r.model,
         tokens_in:   r.tokens_in.map(|v| v as u32),
         tokens_out:  r.tokens_out.map(|v| v as u32),
@@ -185,36 +208,35 @@ impl EventStore for HiqliteStore {
         let now = now_ms();
         let run_str = run_id.to_string();
 
-        // Get last seq + hash
+        // Get the current tail. Hashes are derived from envelope content, just
+        // like SqliteStore, so no extra schema column is required.
         let last: Vec<TurnRow> = self.client.query_as(
-            "SELECT seq, prev_hash, hash, kind, payload, model, tokens_in, tokens_out, wall_ms, created_at
+            "SELECT seq, prev_hash, kind, payload, payload_cid, model, tokens_in, tokens_out, wall_ms, created_at
              FROM turns WHERE run_id = $1 ORDER BY seq DESC LIMIT 1",
             params!(run_str.clone()),
         ).await.map_err(|e| LegionError::Store(e.to_string()))?;
 
-        let (next_seq, prev_hash) = if last.is_empty() {
-            (0u64, [0u8; 32])
+        let (next_seq, prev_hash) = if let Some(row) = last.into_iter().next() {
+            let seq = row.seq as u64 + 1;
+            let envelope = turn_row_to_envelope(run_id, row);
+            (seq, hash_envelope(&envelope))
         } else {
-            let r = &last[0];
-            let arr: [u8; 32] = r.hash.as_slice().try_into().unwrap_or([0u8; 32]);
-            (r.seq as u64 + 1, arr)
+            (0u64, [0u8; 32])
         };
-
-        let hash  = hash_content(next_seq, &prev_hash, &event, now);
         let kind_tag = serde_json::to_string(&event.kind)
             .unwrap_or_else(|_| "\"SessionStarted\"".into());
         let payload_str = event.payload.as_ref().map(|v| v.to_string());
 
         self.client.execute(
-            "INSERT INTO turns (run_id, seq, prev_hash, hash, kind, payload, model, tokens_in, tokens_out, wall_ms, created_at)
+            "INSERT INTO turns (run_id, seq, prev_hash, kind, payload, payload_cid, model, tokens_in, tokens_out, wall_ms, created_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
             params!(
                 run_str.clone(),
                 next_seq as i64,
                 prev_hash.to_vec(),
-                hash.to_vec(),
                 kind_tag,
                 payload_str,
+                event.payload_cid,
                 event.model,
                 event.tokens_in.map(|v| v as i64),
                 event.tokens_out.map(|v| v as i64),
@@ -233,17 +255,21 @@ impl EventStore for HiqliteStore {
 
     async fn read_log(&self, run_id: RunId) -> Result<Vec<TurnEnvelope>> {
         let rows: Vec<TurnRow> = self.client.query_as(
-            "SELECT seq, prev_hash, hash, kind, payload, model, tokens_in, tokens_out, wall_ms, created_at
+            "SELECT seq, prev_hash, kind, payload, payload_cid, model, tokens_in, tokens_out, wall_ms, created_at
              FROM turns WHERE run_id = $1 ORDER BY seq ASC",
             params!(run_id.to_string()),
         ).await.map_err(|e| LegionError::Store(e.to_string()))?;
 
-        Ok(rows.into_iter().map(|r| turn_row_to_envelope(run_id, r)).collect())
+        let log: Vec<_> = rows.into_iter()
+            .map(|row| turn_row_to_envelope(run_id, row))
+            .collect();
+        verify_chain(&log, run_id)?;
+        Ok(log)
     }
 
     async fn read_recent(&self, run_id: RunId, n: usize) -> Result<Vec<TurnEnvelope>> {
         let rows: Vec<TurnRow> = self.client.query_as(
-            "SELECT seq, prev_hash, hash, kind, payload, model, tokens_in, tokens_out, wall_ms, created_at
+            "SELECT seq, prev_hash, kind, payload, payload_cid, model, tokens_in, tokens_out, wall_ms, created_at
              FROM turns WHERE run_id = $1 ORDER BY seq DESC LIMIT $2",
             params!(run_id.to_string(), n as i64),
         ).await.map_err(|e| LegionError::Store(e.to_string()))?;
@@ -313,8 +339,8 @@ impl EventStore for HiqliteStore {
         ).await.map_err(|e| LegionError::Store(e.to_string()))?;
 
         self.client.execute(
-            "INSERT INTO turns (run_id, seq, prev_hash, hash, kind, payload, model, tokens_in, tokens_out, wall_ms, created_at)
-             SELECT $1, seq, prev_hash, hash, kind, payload, model, tokens_in, tokens_out, wall_ms, $2
+            "INSERT INTO turns (run_id, seq, prev_hash, kind, payload, payload_cid, model, tokens_in, tokens_out, wall_ms, created_at)
+             SELECT $1, seq, prev_hash, kind, payload, payload_cid, model, tokens_in, tokens_out, wall_ms, $2
              FROM turns WHERE run_id = $3 AND seq <= $4",
             params!(new_str, now, run_str, at_seq as i64),
         ).await.map_err(|e| LegionError::Store(e.to_string()))?;

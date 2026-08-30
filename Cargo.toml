@@ -19,6 +19,7 @@ repository   = "https://github.com/rcarmo/legion"
 rust-version = "1.95"
 
 [workspace.dependencies]
+base64      = "0.22"
 # Core async
 tokio       = { version = "1", features = ["full"] }
 async-trait = "0.1"
@@ -48,7 +49,7 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 
 # Storage – distributed (Milestone 1+)
-hiqlite = { version = "0.14", default-features = false, features = ["sqlite", "auto-heal", "listen_notify_local", "dlock"] }
+hiqlite = { version = "0.14", default-features = false, features = ["sqlite", "macros", "auto-heal", "listen_notify_local", "dlock"] }
 
 # P2P networking (Milestone 1+)
 iroh                     = "1"

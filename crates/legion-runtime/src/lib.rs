@@ -2,7 +2,7 @@
 //!
 //! Executes deployed functions from the namespace.  Two runtimes are supported:
 //!
-//! - **WASM** — via extism/wasmtime (Milestone 3; guarded by `wasm` feature flag)
+//! - **WASM** — via extism/wasmtime (guarded by the optional `extism` feature)
 //! - **Bun** — subprocess execution of JS/TS functions (Milestone 3)
 //!
 //! For Milestone 2, this crate provides:
@@ -15,7 +15,7 @@
 pub mod manifest;
 pub mod invoke;
 pub mod bun;
-#[cfg(feature = "wasm")]
+#[cfg(feature = "extism")]
 pub mod wasm;
 pub mod registry_bridge;
 

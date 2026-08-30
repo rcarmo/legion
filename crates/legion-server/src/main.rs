@@ -15,6 +15,8 @@ use legion_deploy::DeployPipeline;
 use legion_loop::driver::LegionLoop;
 use legion_namespace::Namespace;
 use legion_runtime::{bun::BunRuntime, registry_bridge::RegistryBridge};
+#[cfg(feature = "wasm")]
+use legion_runtime::wasm::WasmRuntime;
 use legion_store::SqliteStore;
 #[cfg(feature = "distributed")]
 use legion_store::HiqliteStore;
@@ -68,10 +70,8 @@ async fn main() -> Result<()> {
     // ── Storage ───────────────────────────────────────────────────────────────
     std::fs::create_dir_all(&cfg.cluster.data_dir)?;
 
-    // Choose store: multi-node Raft (hiqlite) or single-node SQLite
+    // Choose store: multi-node Raft (hiqlite) or single-node SQLite.
     let arc_store: Arc<dyn legion_core::traits::EventStore>;
-    // Keep SqliteStore in scope for AppState (single-node path)
-    let sqlite_store_opt: Option<SqliteStore>;
 
     #[cfg(feature = "distributed")]
     if !cfg.raft_peers.is_empty() {
@@ -93,13 +93,11 @@ async fn main() -> Result<()> {
         info!(node_id = cfg.raft_node_id, peers = cfg.raft_peers.len(), "starting distributed hiqlite store");
         let hs = HiqliteStore::connect(hql_cfg).await?;
         arc_store = Arc::new(hs);
-        sqlite_store_opt = None;
     } else {
         let db_path = cfg.cluster.data_dir.join("sessions.db");
         let s = SqliteStore::open(&db_path)?;
         info!(db = %db_path.display(), "event store ready (sqlite)");
-        arc_store = Arc::new(s.clone());
-        sqlite_store_opt = Some(s);
+        arc_store = Arc::new(s);
     }
 
     #[cfg(not(feature = "distributed"))]
@@ -107,8 +105,7 @@ async fn main() -> Result<()> {
         let db_path = cfg.cluster.data_dir.join("sessions.db");
         let s = SqliteStore::open(&db_path)?;
         info!(db = %db_path.display(), "event store ready (sqlite)");
-        arc_store = Arc::new(s.clone());
-        sqlite_store_opt = Some(s);
+        arc_store = Arc::new(s);
     }
 
     // ── Namespace ─────────────────────────────────────────────────────────────
@@ -167,7 +164,15 @@ async fn main() -> Result<()> {
     // ── REST API ──────────────────────────────────────────────────────────────
     let api_key = std::env::var("LEGION_API_KEY").ok().or(cfg.api_key.clone());
     if api_key.is_some() { info!("API key authentication enabled"); } else { warn!("no API key set — server is open"); }
-    let state = Arc::new(AppState { store: arc_store, lp, deployer, namespace, invoker: bun_runtime as Arc<dyn legion_runtime::invoke::Invoker> });
+    let state = Arc::new(AppState {
+        store: arc_store,
+        lp,
+        deployer,
+        namespace,
+        invoker_bun: bun_runtime as Arc<dyn legion_runtime::invoke::Invoker>,
+        #[cfg(feature = "wasm")]
+        invoker_wasm: Arc::new(WasmRuntime::new(cfg.cluster.data_dir.join("fn"))),
+    });
     let addr  = format!("0.0.0.0:{}", cfg.cluster.api_port);
     api::serve(state, addr, api_key).await?;
     Ok(())

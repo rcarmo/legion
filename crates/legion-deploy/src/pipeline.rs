@@ -50,7 +50,11 @@ impl DeployPipeline {
             return failed(job, start, format!("create dir: {e}"));
         }
         let code_path = fn_dir.join(format!("index.{ext}"));
-        if let Err(e) = std::fs::write(&code_path, &job.code) {
+        let write_result = match (&job.runtime, &job.wasm_bytes) {
+            (FunctionRuntime::Wasm, Some(bytes)) => std::fs::write(&code_path, bytes),
+            _ => std::fs::write(&code_path, &job.code),
+        };
+        if let Err(e) = write_result {
             return failed(job, start, format!("write code: {e}"));
         }
 

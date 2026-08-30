@@ -1,11 +1,12 @@
 //! REST API — axum router for session management.
 //!
 //! Routes:
-//!   POST   /sessions              — create a new session
-//!   GET    /sessions/:id          — get session status
-//!   POST   /sessions/:id/messages — send a user message + run one resolve turn
-//!   GET    /sessions/:id/log      — get the full event log
-//!   GET    /health                — liveness probe
+//!   POST   /sessions               — create a new session
+//!   GET    /sessions/{id}          — get session status
+//!   POST   /sessions/{id}/messages — send a user message + run one resolve turn
+//!   GET    /sessions/{id}/log      — get the full event log
+//!   GET    /sessions/{id}/stream   — stream one resolve turn via SSE
+//!   GET    /health                 — liveness probe
 
 use std::sync::Arc;
 
@@ -18,7 +19,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -26,8 +27,8 @@ use uuid::Uuid;
 use legion_core::traits::{AgentLoopTrait, EventStore};
 use legion_core::types::{Budget, ExternalEvent, RunConfig};
 use legion_deploy::{DeployJob, DeployPipeline};
-use legion_loop::{driver::LegionLoop, SessionEvent};
-use legion_namespace::{Namespace, NodeKind};
+use legion_loop::driver::LegionLoop;
+use legion_namespace::Namespace;
 use legion_runtime::{invoke::{InvokeRequest, Invoker}, manifest::FunctionRuntime};
 
 // ── AppState ──────────────────────────────────────────────────────────────────
@@ -37,8 +38,10 @@ pub struct AppState {
     pub store:     Arc<dyn EventStore>,
     pub lp:        Arc<LegionLoop>,
     pub deployer:  Arc<DeployPipeline>,
-    pub namespace: Namespace,
-    pub invoker:   Arc<dyn Invoker>,
+    pub namespace:   Namespace,
+    pub invoker_bun:  Arc<dyn Invoker>,
+    #[cfg(feature = "wasm")]
+    pub invoker_wasm: Arc<legion_runtime::wasm::WasmRuntime>,
 }
 
 // ── Request / response types ──────────────────────────────────────────────────
@@ -63,7 +66,10 @@ struct DeployRequest {
     name:        String,
     runtime:     Option<String>,
     description: Option<String>,
-    code:        String,
+    /// Inline source code (Bun/JS).
+    code:        Option<String>,
+    /// Base64-encoded WASM module bytes.
+    wasm_b64:    Option<String>,
     idempotent:  Option<bool>,
     parameters:  Option<serde_json::Value>,
 }
@@ -186,10 +192,23 @@ async fn deploy_function(
     };
     let mut job = DeployJob::new(
         req.name,
-        runtime,
+        runtime.clone(),
         req.description.unwrap_or_default(),
-        req.code,
+        req.code.unwrap_or_default(),
     );
+    if runtime == FunctionRuntime::Wasm {
+        if let Some(encoded) = req.wasm_b64 {
+            job.wasm_bytes = Some(base64_decode(&encoded).map_err(|e| {
+                (StatusCode::BAD_REQUEST, Json(json!({
+                    "error": format!("invalid wasm_b64: {e}")
+                })))
+            })?);
+        } else {
+            return Err((StatusCode::BAD_REQUEST, Json(json!({
+                "error": "wasm runtime requires wasm_b64"
+            }))));
+        }
+    }
     if let Some(p) = req.parameters { job.parameters = p; }
     if let Some(i) = req.idempotent  { job.idempotent = i; }
 
@@ -199,6 +218,15 @@ async fn deploy_function(
     } else {
         Err((StatusCode::UNPROCESSABLE_ENTITY, Json(serde_json::to_value(&outcome).unwrap())))
     }
+}
+
+fn base64_decode(input: &str) -> anyhow::Result<Vec<u8>> {
+    use base64::Engine;
+
+    base64::engine::general_purpose::STANDARD
+        .decode(input)
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(input))
+        .map_err(|e| anyhow::anyhow!("base64: {e}"))
 }
 
 async fn list_functions(
@@ -226,7 +254,7 @@ async fn delete_function(
     Ok(Json(json!({ "name": name, "deleted": true })))
 }
 
-/// GET /sessions/:id/stream — SSE stream of a single resolve turn.
+/// GET /sessions/{id}/stream — SSE stream of a single resolve turn.
 /// Client sends the user message as a query param `?message=...` or in headers.
 async fn stream_session(
     State(state): State<Arc<AppState>>,
@@ -237,7 +265,7 @@ async fn stream_session(
     use std::convert::Infallible;
 
     let message = params.get("message").cloned().unwrap_or_default();
-    let mut rx  = state.lp.clone().stream_resolve(id, message);
+    let rx = state.lp.clone().stream_resolve(id, message);
 
     let sse_stream = stream::unfold(rx, |mut rx| async move {
         match rx.recv().await {
@@ -259,17 +287,35 @@ async fn invoke_function(
     Path(name):   Path<String>,
     Json(args):   Json<Value>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    // Check the function exists in namespace
     let manifest_path = format!("/fn/{name}/manifest.json");
-    if state.namespace.get(&manifest_path).await.is_none() {
-        return Err(not_found(format!("function not found: {name}")));
-    }
+    let manifest = state.namespace.get(&manifest_path).await
+        .ok_or_else(|| not_found(format!("function not found: {name}")))?;
+    let runtime = if let legion_namespace::NodeKind::Json(ref value) = manifest.kind {
+        value.get("runtime")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or(FunctionRuntime::Bun)
+    } else {
+        FunctionRuntime::Bun
+    };
 
-    let result = state.invoker.invoke(InvokeRequest {
+    let request = InvokeRequest {
         function_name: name.clone(),
         call_id:       uuid::Uuid::new_v4().to_string(),
         args,
-    }).await.map_err(|e| server_error(e.to_string()))?;
+    };
+    let result = match runtime {
+        #[cfg(feature = "wasm")]
+        FunctionRuntime::Wasm => state.invoker_wasm.invoke(request).await
+            .map_err(|e| server_error(e.to_string()))?,
+        #[cfg(not(feature = "wasm"))]
+        FunctionRuntime::Wasm => {
+            return Err((StatusCode::NOT_IMPLEMENTED, Json(json!({
+                "error": "server was built without WASM runtime support"
+            }))));
+        }
+        FunctionRuntime::Bun => state.invoker_bun.invoke(request).await
+            .map_err(|e| server_error(e.to_string()))?,
+    };
 
     if let Some(err) = result.error {
         return Err((StatusCode::UNPROCESSABLE_ENTITY, Json(json!({

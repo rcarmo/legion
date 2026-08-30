@@ -13,8 +13,11 @@ pub struct DeployJob {
     pub description: String,
     /// JSON Schema for function args (presented to the LLM).
     pub parameters:  serde_json::Value,
-    /// JS/TS source code or base64-encoded WASM bytes.
+    /// JS/TS source code.
     pub code:        String,
+    /// Raw WASM module bytes. Used only by the WASM runtime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wasm_bytes:  Option<Vec<u8>>,
     pub idempotent:  bool,
     pub submitted_at: i64,
 }
@@ -33,6 +36,7 @@ impl DeployJob {
             description: description.into(),
             parameters:  serde_json::json!({ "type": "object", "properties": {} }),
             code:        code.into(),
+            wasm_bytes:  None,
             idempotent:  false,
             submitted_at: chrono::Utc::now().timestamp_millis(),
         }

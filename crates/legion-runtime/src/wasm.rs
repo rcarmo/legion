@@ -1,7 +1,7 @@
 //! WASM runtime via extism.
 //!
-//! Executes deployed WASM functions. The WASM module must export a `main` function
-//! that reads JSON from stdin (extism input) and writes JSON to stdout (extism output).
+//! Executes deployed WASM functions. The module must export a `run` function
+//! that accepts JSON input and returns JSON output through the Extism ABI.
 //!
 //! WASM modules are compiled at deploy time and cached by function name.
 
@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use extism::{Plugin, Wasm, Manifest};
 use serde_json::Value;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use legion_core::error::{LegionError, Result};
 use crate::invoke::{InvokeRequest, InvokeResult, Invoker};
@@ -78,8 +78,8 @@ impl Invoker for WasmRuntime {
                 .map_err(|e| LegionError::ToolError(format!("create plugin: {e}")))?;
 
             let output: Vec<u8> = plugin
-                .call("main", args_json.as_bytes())
-                .map_err(|e| LegionError::ToolError(format!("call main: {e}")))?;
+                .call("run", args_json.as_bytes())
+                .map_err(|e| LegionError::ToolError(format!("call run: {e}")))?;
 
             let output_val: Value = serde_json::from_slice(&output)
                 .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&output).into_owned()));

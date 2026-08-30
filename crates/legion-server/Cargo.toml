@@ -11,7 +11,9 @@ name = "legion"
 path = "src/main.rs"
 
 [features]
+default     = ["wasm"]
 distributed = ["legion-store/distributed", "hiqlite"]
+wasm        = ["legion-runtime/extism"]
 
 [dependencies]
 legion-core    = { path = "../legion-core" }
@@ -23,6 +25,7 @@ legion-namespace = { path = "../legion-namespace" }
 legion-runtime   = { path = "../legion-runtime" }
 
 hiqlite     = { workspace = true, optional = true }
+base64      = { workspace = true }
 futures          = { workspace = true }
 tokio            = { workspace = true }
 anyhow           = { workspace = true }
