@@ -15,7 +15,7 @@ The agent loop (`legion-loop`) is the stateful execution engine for a single age
 Idle
   │ start(config)
   ▼
-Running ◄─────────────────────────────────────────────────┐
+Running ◄──────────────────────────────────────────────────┐
   │                                                        │
   ├── build_context(last N turns)                          │
   ├── EventStore.append(ModelCallIntent) ← write-ahead     │
