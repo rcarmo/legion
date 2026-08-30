@@ -4,12 +4,12 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    Client Layer                          │
+│                    Client Layer                         │
 │   Bun workers · WASM guests · REST API · CLI · picoclaw │
 └────────────────────────┬────────────────────────────────┘
                          │ 9P over QUIC (iroh transport)
 ┌────────────────────────▼────────────────────────────────┐
-│               9P Namespace (legion-namespace)            │
+│               9P Namespace (legion-namespace)           │
 │  /fn/<name>              callable functions             │
 │  /fn/<name>/versions     CID history                    │
 │  /sessions/<id>/turns    append-only turn log           │
@@ -24,35 +24,35 @@
            ┌─────────────┴──────────────┐
            │                            │
 ┌──────────▼──────────┐    ┌────────────▼──────────────┐
-│  Agent Loop          │    │  Function Executor         │
-│  (legion-loop)       │    │  (legion-runtime)          │
-│                      │    │                            │
-│  rs-ai EventStream   │    │  wasmtime + extism (WASM) │
-│  TurnPhase FSM       │    │  Bun subprocess (JS/TS)   │
-│  Tool dispatch       │    │  Fetch blob by CID        │
-│  Budget enforcement  │    │  Enforce budget           │
-│  Park / Resume       │    │  Collect result CID       │
+│  Agent Loop         │    │  Function Executor.       │
+│  (legion-loop)      │    │  (legion-runtime)         │
+│                     │    │                           │
+│  rs-ai EventStream  │    │  wasmtime + extism (WASM) │
+│  TurnPhase FSM      │    │  Bun subprocess (JS/TS)   │
+│  Tool dispatch      │    │  Fetch blob by CID        │
+│  Budget enforcement │    │  Enforce budget           │
+│  Park / Resume      │    │  Collect result CID       │
 └──────────┬──────────┘    └────────────┬──────────────┘
            │                            │
            └─────────────┬──────────────┘
                          │
-┌────────────────────────▼────────────────────────────────┐
-│               EventStore (legion-store)                  │
-│                                                          │
-│  hiqlite (openraft + rusqlite)                          │
+┌────────────────────────▼───────────────────────────────┐
+│               EventStore (legion-store)                │
+│                                                        │
+│  hiqlite (openraft + rusqlite)                         │
 │  ┌─────────────────────────────────────────────────┐   │
 │  │ turns · sessions · functions · cluster_state    │   │
 │  │ distributed locks · listen/notify · migrations  │   │
 │  └───────────────────────┬─────────────────────────┘   │
-│                           │ Raft log entries             │
-│  fjall (pure Rust LSM)   ◄┘                             │
-│                                                          │
-│  iroh-blobs (CAS) ◄── payload CIDs from turns table     │
-└────────────────────────┬────────────────────────────────┘
+│                          │ Raft log entries            │
+│  fjall (pure Rust LSM)  ◄┘                             │
+│                                                        │
+│  iroh-blobs (CAS) ◄── payload CIDs from turns table    │
+└────────────────────────┬───────────────────────────────┘
                          │
 ┌────────────────────────▼────────────────────────────────┐
-│               Cluster Layer (legion-cluster)             │
-│                                                          │
+│               Cluster Layer (legion-cluster)            │
+│                                                         │
 │  iroh endpoint (public-key identity)                    │
 │  iroh-mdns-address-lookup (LAN bootstrap)               │
 │  mdns-sd (Bonjour/DNS-SD registration)                  │
