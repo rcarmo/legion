@@ -1,6 +1,6 @@
 # Roadmap
 
-Legion is in early design stage. This roadmap tracks work by milestone.
+Legion is in early design stage, which means that I am still yelling at AI to discuss some of this even after my initial notes (_especially_ because it lost my initial notes and did this). This roadmap tracks work by milestone.
 
 ## Milestone 0: Foundation (current)
 
