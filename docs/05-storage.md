@@ -1,6 +1,6 @@
 # Storage
 
-Legion uses three complementary storage layers, each optimised for a different access pattern.
+Legion uses three complementary storage layers, each optimised for a different access pattern. Which is a nice way to say I couldn't stuff everything directly into SQLite this time. Yet.
 
 ## Layer Summary
 
