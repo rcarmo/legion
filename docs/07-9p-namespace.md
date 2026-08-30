@@ -4,6 +4,8 @@ Legion exposes all cluster resources through a 9P filesystem namespace served by
 
 ## Why 9P?
 
+The short version is that I wanted something _dead simple_. Plan9 is both... "dead" (fine, I run it too), and simple, and it beats reinventing the wheel.
+
 - **Minimal protocol**: The entire RPC surface is `open`, `read`, `write`, `stat`, `walk` — standard Unix filesystem semantics
 - **Transparent remoting**: `/peers/<key>/fn/<name>` routes to any node without a custom RPC protocol
 - **WASI compatibility**: WASM function hosts intercept WASI `fd_write`/`fd_read` and route them through the 9P namespace — functions do not know they are in a cluster
