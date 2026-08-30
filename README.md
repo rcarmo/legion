@@ -2,7 +2,9 @@
 
 > A self-hosted, self-healing durable functions platform with Raft consensus, content-addressed storage, and a 9P namespace — running AI agents and WASM/Bun functions across a LAN-bootstrapped P2P cluster.
 
-Legion is the open, self-hostable equivalent of Cloudflare Agents / Durable Objects, built entirely in Rust.
+Legion is the open, self-hostable equivalent of Cloudflare Agents / Durable Objects, built entirely in Rust. Consider it a learning experience in various ways, informed by my interest in Plan9, general concerns about doing lifecycle management The Right Way<sup>TM</sup>, and wanting something I could run locally across Intel and ARM machines (often very low powered SBCs).
+
+It's also a stab at making [`piclaw`](https://github.com/rcarmo/piclaw)'s back-end nearly impossible to kill without hitting the main breaker.
 
 ## What It Is
 
@@ -12,7 +14,13 @@ Legion is the open, self-hostable equivalent of Cloudflare Agents / Durable Obje
 - **Self-healing** — iroh P2P reconnects by public key, not IP; mDNS bootstraps the cluster with zero config on a LAN
 - **9P namespace** — Every cluster resource (functions, sessions, peers) is accessible as a file path via jetstream
 
+## What It's Not
+
+The answer to everyone's needs. Or finished.
+
 ## Architecture at a Glance
+
+After a few weeks of pondering, this is what I came up with, and substantiated in `docs` after yelling at AI for a long time. When it stopped yelling back about "best practices", I wagered this was good enough for a first cut:
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -37,7 +45,7 @@ Legion is the open, self-hostable equivalent of Cloudflare Agents / Durable Obje
                        │
 ┌──────────────────────▼──────────────────────────────┐
 │  Cluster (legion-cluster)                           │
-│  iroh QUIC · mDNS LAN bootstrap · iroh-gossip      │
+│  iroh QUIC · mDNS LAN bootstrap · iroh-gossip       │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -58,21 +66,21 @@ Legion is the open, self-hostable equivalent of Cloudflare Agents / Durable Obje
 
 | Library | Role |
 |---|---|
-| `rs-ai` | LLM provider abstraction (OpenAI, Anthropic, Gemini, Mistral, Bedrock…) |
-| `hiqlite` | Raft-replicated SQLite (openraft + rusqlite) |
-| `fjall` | Pure-Rust LSM store for Raft log |
-| `iroh` | QUIC P2P transport, public-key routing |
-| `iroh-blobs` | Content-addressed blob store |
+| `rs-ai` | LLM provider abstraction (OpenAI, Anthropic, Gemini, Mistral, Bedrock…). Full credit to Mario Zechner for designing the original version |
+| `hiqlite` | Raft-replicated SQLite (openraft + rusqlite). I hit upon this partly by chance and partly because of my love of all things SQLite |
+| `fjall` | Pure-Rust LSM store for Raft log. I hope this one pans out |
+| `iroh` | QUIC P2P transport, public-key routing, because I wanted to start with Bonjour peer discovery on the LAN and this makes it planetary |
+| `iroh-blobs` | Content-addressed blob store, because it saved me the trouble of reinventing S3/R2 |
 | `iroh-gossip` | Cluster membership + health |
 | `iroh-mdns-address-lookup` | LAN mDNS bootstrap |
 | `mdns-sd` | Bonjour/DNS-SD service registration |
-| `jetstream` | 9P RPC over QUIC/iroh |
-| `wasmtime` + `extism` | WASM function runtime |
+| `jetstream` | 9P RPC over QUIC/iroh. This was a very lucky find. |
+| `wasmtime` + `extism` | WASM function runtime, because, well, I don't want to have separate Intel and ARM functions, and this combo seemed moderately sane even though I mostly use Go for WASM |
 | `openraft` | Consensus engine (used via hiqlite) |
 
 ## Status
 
-Early design stage. See [docs/10-roadmap.md](docs/10-roadmap.md) for milestone plan.
+Early design stage. See [docs/10-roadmap.md](docs/10-roadmap.md) for milestone plan, or 99-world-domination.md (when robots take over running this) for the end state.
 
 ## Documentation
 
