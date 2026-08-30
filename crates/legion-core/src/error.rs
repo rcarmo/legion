@@ -28,6 +28,9 @@ pub enum LegionError {
     #[error("tool not found: {0}")]
     ToolNotFound(String),
 
+    #[error("tool error: {0}")]
+    ToolError(String),
+
     #[error("tool dispatch error for '{name}': {reason}")]
     ToolDispatch { name: String, reason: String },
 

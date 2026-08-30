@@ -10,7 +10,9 @@
 
 mod api;
 mod config;
+mod tools;
 
+use std::sync::Arc;
 use anyhow::Result;
 use tracing::{info, warn};
 
@@ -23,6 +25,7 @@ use legion_loop::driver::LegionLoop;
 use legion_store::SqliteStore;
 
 use config::ServerConfig;
+use tools::BuiltinToolRegistry;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -68,10 +71,10 @@ async fn main() -> Result<()> {
     info!(db = %db_path.display(), "event store ready");
 
     // ── Agent loop ───────────────────────────────────────────────────────────
-    use std::sync::Arc;
-    use legion_core::test_doubles::EchoToolRegistry;
-    let tools = Arc::new(EchoToolRegistry::new());
-    let _lp   = LegionLoop::new(Arc::new(store.clone()), tools);
+    let arc_store = Arc::new(store.clone()) as Arc<dyn legion_core::traits::EventStore>;
+    let arc_node  = Arc::new(node);
+    let tools     = Arc::new(BuiltinToolRegistry::new(arc_store.clone(), arc_node.clone()));
+    let _lp       = LegionLoop::new(arc_store.clone(), tools);
     info!("agent loop ready");
 
     // ── REST API ─────────────────────────────────────────────────────────────
