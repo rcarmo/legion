@@ -1,6 +1,6 @@
 # Function Runtime
 
-Legion runs functions in two execution environments: WASM (via wasmtime + extism) and Bun (via subprocess). Both runtimes receive input through the 9P namespace and return output the same way.
+Legion runs functions in two execution environments: WASM (via wasmtime + extism) and Bun (via subprocess, at least for now). Both runtimes receive input through the 9P namespace and return output the same way.
 
 ## Runtime Selection
 
@@ -27,6 +27,8 @@ Raw wasmtime exposes WASI to guest modules, but doesn't provide typed input/outp
 - **Typed PDK**: Guest functions declare typed inputs/outputs in Rust, TypeScript, Go, Python, etc.
 - **Host functions**: The host (Legion) provides functions the guest can call (logging, HTTP, etc.)
 - **Memory management**: extism handles the host↔guest ABI for arbitrary-length data
+
+In particular, extism will let me plug in my own network functions and have a runtime that can reach beyond its navel.
 
 ### WASM execution flow
 
