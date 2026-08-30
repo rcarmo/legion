@@ -4,6 +4,7 @@ mod api;
 mod auth;
 mod cli;
 mod config;
+mod rate_limit;
 mod tools;
 
 use std::sync::Arc;
@@ -28,6 +29,7 @@ use legion_store::HiqliteStore;
 
 use api::AppState;
 use config::ServerConfig;
+use rate_limit::SessionRateLimiter;
 use tools::BuiltinToolRegistry;
 
 #[tokio::main]
@@ -89,6 +91,19 @@ async fn run_server() -> Result<()> {
     apply_env(
         &mut cfg.invocation.max_concurrent_per_function,
         "LEGION_INVOKE_MAX_CONCURRENT_PER_FUNCTION",
+    );
+    apply_env(
+        &mut cfg.invocation.max_requests_per_window,
+        "LEGION_INVOKE_MAX_REQUESTS_PER_WINDOW",
+    );
+    apply_env(&mut cfg.invocation.rate_window_ms, "LEGION_INVOKE_RATE_WINDOW_MS");
+    apply_env(
+        &mut cfg.session_rate_limit.max_requests_per_window,
+        "LEGION_SESSION_MAX_REQUESTS_PER_WINDOW",
+    );
+    apply_env(
+        &mut cfg.session_rate_limit.window_ms,
+        "LEGION_SESSION_RATE_WINDOW_MS",
     );
     info!(
         data_dir = %cfg.cluster.data_dir.display(),
@@ -237,6 +252,7 @@ async fn run_server() -> Result<()> {
         #[cfg(feature = "wasm")]
         invoker_wasm: wasm_runtime,
         invocation_metrics,
+        session_rate_limiter: Arc::new(SessionRateLimiter::new(cfg.session_rate_limit)),
     });
     let addr  = format!("0.0.0.0:{}", cfg.cluster.api_port);
     api::serve(state, addr, api_key).await?;

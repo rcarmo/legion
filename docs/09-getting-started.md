@@ -153,6 +153,12 @@ timeout_ms = 30000
 max_input_bytes = 1048576
 max_output_bytes = 4194304
 max_concurrent_per_function = 8
+max_requests_per_window = 120
+rate_window_ms = 60000
+
+[session_rate_limit]
+max_requests_per_window = 30
+window_ms = 60000
 ```
 
 The packaged systemd unit sets `LEGION_CONFIG=/etc/legion/legion.toml` and loads secrets from `/etc/legion/legion.env`.
@@ -220,9 +226,13 @@ timeout_ms = 30000
 max_input_bytes = 1048576
 max_output_bytes = 4194304
 max_concurrent_per_function = 8
+max_requests_per_window = 120
+rate_window_ms = 60000
 ```
 
-The equivalent environment overrides are `LEGION_INVOKE_TIMEOUT_MS`, `LEGION_INVOKE_MAX_INPUT_BYTES`, `LEGION_INVOKE_MAX_OUTPUT_BYTES`, and `LEGION_INVOKE_MAX_CONCURRENT_PER_FUNCTION`. Limit errors return HTTP 413 (payload), 429 (concurrency), or 504 (deadline). `/metrics` reports per-function invocation counts and wall time plus replay-derived agent turn and token totals.
+The equivalent environment overrides are `LEGION_INVOKE_TIMEOUT_MS`, `LEGION_INVOKE_MAX_INPUT_BYTES`, `LEGION_INVOKE_MAX_OUTPUT_BYTES`, `LEGION_INVOKE_MAX_CONCURRENT_PER_FUNCTION`, `LEGION_INVOKE_MAX_REQUESTS_PER_WINDOW`, and `LEGION_INVOKE_RATE_WINDOW_MS`. Limit errors return HTTP 413 (payload), 429 (rate/concurrency), or 504 (deadline). `/metrics` reports per-function invocation counts and wall time plus replay-derived agent turn and token totals.
+
+Session execution requests (`messages`, `stream`, and external `events`) are limited per session through `[session_rate_limit]`, with `LEGION_SESSION_MAX_REQUESTS_PER_WINDOW` and `LEGION_SESSION_RATE_WINDOW_MS` overrides. Read and reconciliation routes remain available. HTTP 429 responses include `Retry-After`; function and session rejections are exported by `/metrics`.
 
 Session budgets accept `max_turns`, `max_tool_calls`, `max_tokens_in`, `max_tokens_out`, and `max_wall_ms`. Budget halts are stored as `SessionBudgetHalt` events and set the durable session status to `budget_halt`.
 

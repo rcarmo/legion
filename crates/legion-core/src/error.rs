@@ -45,6 +45,9 @@ pub enum LegionError {
         limit: usize,
     },
 
+    #[error("function {function} rate limit exceeded; retry after {retry_after_ms} ms")]
+    InvocationRateLimited { function: String, retry_after_ms: u64 },
+
     #[error("function {0} has reached its concurrency limit")]
     InvocationBusy(String),
 

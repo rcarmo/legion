@@ -19,3 +19,9 @@ timeout_ms = 30000
 max_input_bytes = 1048576
 max_output_bytes = 4194304
 max_concurrent_per_function = 8
+max_requests_per_window = 120
+rate_window_ms = 60000
+
+[session_rate_limit]
+max_requests_per_window = 30
+window_ms = 60000

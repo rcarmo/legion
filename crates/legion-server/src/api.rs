@@ -13,9 +13,9 @@ use std::{collections::BTreeMap, sync::Arc};
 use anyhow::Result;
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{header, HeaderValue, StatusCode},
     middleware,
-    response::{Json, Sse, sse::Event as SseEvent},
+    response::{IntoResponse, Json, Sse, sse::Event as SseEvent},
     routing::{get, post},
     Router,
 };
@@ -35,6 +35,8 @@ use legion_runtime::{
     InvocationMetrics,
 };
 
+use crate::rate_limit::SessionRateLimiter;
+
 // ── AppState ──────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -47,6 +49,7 @@ pub struct AppState {
     #[cfg(feature = "wasm")]
     pub invoker_wasm: Arc<dyn Invoker>,
     pub invocation_metrics: Arc<InvocationMetrics>,
+    pub session_rate_limiter: Arc<SessionRateLimiter>,
 }
 
 // ── Request / response types ──────────────────────────────────────────────────
@@ -141,6 +144,11 @@ async fn metrics(
     for (model, (_, _, _, wall_ms)) in &by_model {
         output.push_str(&format!("legion_session_turn_wall_ms_total{{model=\"{}\"}} {wall_ms}\n", prometheus_label(model)));
     }
+    output.push_str("# HELP legion_session_rate_limit_rejections_total Rejected session execution requests.\n# TYPE legion_session_rate_limit_rejections_total counter\n");
+    output.push_str(&format!(
+        "legion_session_rate_limit_rejections_total {}\n",
+        state.session_rate_limiter.rejections(),
+    ));
     Ok(output)
 }
 
@@ -242,17 +250,18 @@ async fn send_message(
     State(state): State<Arc<AppState>>,
     Path(id):     Path<Uuid>,
     Json(req):    Json<SendMessageRequest>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+) -> Result<Json<Value>, axum::response::Response> {
+    check_session_rate(&state, id).await?;
     // Inject the user message and run one resolve turn
     state.lp.resume(id, ExternalEvent::user_message(req.content.clone()))
         .await
-        .map_err(|e| server_error(e.to_string()))?;
+        .map_err(|e| server_error(e.to_string()).into_response())?;
 
     let envelope = state.lp.resolve(id)
         .await
         .map_err(|e| {
             warn!(run_id = %id, err = %e, "resolve error");
-            server_error(e.to_string())
+            server_error(e.to_string()).into_response()
         })?;
 
     let response_text = envelope.event.payload
@@ -350,10 +359,11 @@ async fn stream_session(
     State(state): State<Arc<AppState>>,
     Path(id):     Path<Uuid>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
-) -> Sse<impl futures::Stream<Item = Result<SseEvent, std::convert::Infallible>>> {
+) -> Result<Sse<impl futures::Stream<Item = Result<SseEvent, std::convert::Infallible>>>, axum::response::Response> {
     use futures::stream;
     use std::convert::Infallible;
 
+    check_session_rate(&state, id).await?;
     let message = params.get("message").cloned().unwrap_or_default();
     let rx = state.lp.clone().stream_resolve(id, message);
 
@@ -368,8 +378,8 @@ async fn stream_session(
         }
     });
 
-    Sse::new(sse_stream)
-        .keep_alive(axum::response::sse::KeepAlive::default())
+    Ok(Sse::new(sse_stream)
+        .keep_alive(axum::response::sse::KeepAlive::default()))
 }
 
 async fn reconcile_session(
@@ -397,10 +407,10 @@ async fn invoke_function(
     State(state): State<Arc<AppState>>,
     Path(name):   Path<String>,
     Json(args):   Json<Value>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+) -> Result<Json<Value>, axum::response::Response> {
     let manifest_path = format!("/fn/{name}/manifest.json");
     let manifest = state.namespace.get(&manifest_path).await
-        .ok_or_else(|| not_found(format!("function not found: {name}")))?;
+        .ok_or_else(|| not_found(format!("function not found: {name}")).into_response())?;
     let runtime = if let legion_namespace::NodeKind::Json(ref value) = manifest.kind {
         value.get("runtime")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
@@ -422,7 +432,7 @@ async fn invoke_function(
         FunctionRuntime::Wasm => {
             return Err((StatusCode::NOT_IMPLEMENTED, Json(json!({
                 "error": "server was built without WASM runtime support"
-            }))));
+            }))).into_response());
         }
         FunctionRuntime::Bun => state.invoker_bun.invoke(request).await
             .map_err(invocation_error)?,
@@ -433,7 +443,7 @@ async fn invoke_function(
             "function": name,
             "error":    err,
             "wall_ms":  result.wall_ms,
-        }))));
+        }))).into_response());
     }
 
     Ok(Json(json!({
@@ -448,9 +458,10 @@ async fn session_webhook(
     State(state): State<Arc<AppState>>,
     Path(id):     Path<Uuid>,
     Json(body):   Json<Value>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+) -> Result<Json<Value>, axum::response::Response> {
     use legion_core::traits::AgentLoopTrait;
 
+    check_session_rate(&state, id).await?;
     let trigger_name = body.get("trigger")
         .and_then(|v| v.as_str())
         .unwrap_or("webhook")
@@ -460,7 +471,7 @@ async fn session_webhook(
     state.lp.resume(id, ExternalEvent::ExternalTrigger {
         name:    trigger_name.clone(),
         payload: payload.clone(),
-    }).await.map_err(|e| server_error(e.to_string()))?;
+    }).await.map_err(|e| server_error(e.to_string()).into_response())?;
 
     info!(run_id = %id, trigger = %trigger_name, "external event injected");
 
@@ -471,14 +482,46 @@ async fn session_webhook(
     })))
 }
 
-fn invocation_error(error: legion_core::error::LegionError) -> (StatusCode, Json<Value>) {
-    let status = match &error {
-        legion_core::error::LegionError::InvocationLimitExceeded { .. } => StatusCode::PAYLOAD_TOO_LARGE,
-        legion_core::error::LegionError::InvocationBusy(_) => StatusCode::TOO_MANY_REQUESTS,
-        legion_core::error::LegionError::InvocationTimeout { .. } => StatusCode::GATEWAY_TIMEOUT,
-        _ => StatusCode::INTERNAL_SERVER_ERROR,
+async fn check_session_rate(state: &AppState, run_id: Uuid) -> Result<(), axum::response::Response> {
+    state.store.session_status(run_id).await
+        .map_err(|e| not_found(e.to_string()).into_response())?;
+    let retry_after_ms = match state.session_rate_limiter.check(run_id) {
+        Ok(()) => return Ok(()),
+        Err(retry_after_ms) => retry_after_ms,
     };
-    (status, Json(json!({ "error": error.to_string() })))
+    let mut response = (
+        StatusCode::TOO_MANY_REQUESTS,
+        Json(json!({ "error": "session rate limit exceeded", "retry_after_ms": retry_after_ms })),
+    ).into_response();
+    let retry_after_secs = retry_after_ms.div_ceil(1000).max(1);
+    if let Ok(value) = HeaderValue::from_str(&retry_after_secs.to_string()) {
+        response.headers_mut().insert(header::RETRY_AFTER, value);
+    }
+    Err(response)
+}
+
+fn invocation_error(error: legion_core::error::LegionError) -> axum::response::Response {
+    let (status, retry_after_ms) = match &error {
+        legion_core::error::LegionError::InvocationLimitExceeded { .. } =>
+            (StatusCode::PAYLOAD_TOO_LARGE, None),
+        legion_core::error::LegionError::InvocationRateLimited { retry_after_ms, .. } =>
+            (StatusCode::TOO_MANY_REQUESTS, Some(*retry_after_ms)),
+        legion_core::error::LegionError::InvocationBusy(_) =>
+            (StatusCode::TOO_MANY_REQUESTS, None),
+        legion_core::error::LegionError::InvocationTimeout { .. } =>
+            (StatusCode::GATEWAY_TIMEOUT, None),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, None),
+    };
+    let mut response = (status, Json(json!({
+        "error": error.to_string(),
+        "retry_after_ms": retry_after_ms,
+    }))).into_response();
+    if let Some(ms) = retry_after_ms {
+        if let Ok(value) = HeaderValue::from_str(&ms.div_ceil(1000).max(1).to_string()) {
+            response.headers_mut().insert(header::RETRY_AFTER, value);
+        }
+    }
+    response
 }
 
 fn server_error(msg: String) -> (StatusCode, Json<Value>) {

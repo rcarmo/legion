@@ -43,6 +43,22 @@ pub struct ServerConfig {
     /// Shared limits applied to direct and agent-issued function invocations.
     #[serde(default)]
     pub invocation: InvocationLimits,
+    /// Rate limit for execution-triggering requests to each session.
+    #[serde(default)]
+    pub session_rate_limit: SessionRateLimit,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SessionRateLimit {
+    pub max_requests_per_window: u32,
+    pub window_ms: u64,
+}
+
+impl Default for SessionRateLimit {
+    fn default() -> Self {
+        Self { max_requests_per_window: 30, window_ms: 60_000 }
+    }
 }
 
 fn default_raft_node_id() -> u64 { 1 }
@@ -89,5 +105,7 @@ mod tests {
         assert_eq!(config.cluster.data_dir.to_string_lossy(), "/var/lib/legion");
         assert_eq!(config.cluster.api_port, 8080);
         assert_eq!(config.invocation.timeout_ms, 30_000);
+        assert_eq!(config.invocation.max_requests_per_window, 120);
+        assert_eq!(config.session_rate_limit.max_requests_per_window, 30);
     }
 }

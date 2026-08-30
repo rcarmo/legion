@@ -21,6 +21,8 @@ fi
 echo "==> Starting legion on :$PORT  data=$DATA_DIR"
 LEGION_API_PORT="$PORT" LEGION_DATA_DIR="$DATA_DIR" \
 LEGION_INVOKE_TIMEOUT_MS=100 LEGION_INVOKE_MAX_INPUT_BYTES=1024 \
+LEGION_INVOKE_MAX_REQUESTS_PER_WINDOW=4 LEGION_INVOKE_RATE_WINDOW_MS=60000 \
+LEGION_SESSION_MAX_REQUESTS_PER_WINDOW=1 LEGION_SESSION_RATE_WINDOW_MS=60000 \
 RUST_LOG=error "$BINARY" &
 SERVER_PID=$!
 
@@ -133,6 +135,21 @@ echo "$R" | grep -q 'legion_function_invocations_total{function="hello",runtime=
 echo "$R" | grep -q 'legion_function_invocations_total{function="slow",runtime="bun",outcome="timeout"} 1' \
   && ok "timeout metrics" || fail "timeout metrics" "$R"
 
+for _ in 1 2 3; do
+  curl -sf -X POST "http://localhost:$PORT/functions/add/invoke" \
+    -H "Content-Type: application/json" -d '{"a":1,"b":1}' >/dev/null
+ done
+HEADERS=$(mktemp)
+HTTP=$(curl -s -D "$HEADERS" -o /dev/null -w "%{http_code}" -X POST \
+  "http://localhost:$PORT/functions/add/invoke" \
+  -H "Content-Type: application/json" -d '{"a":1,"b":1}')
+if [[ "$HTTP" = 429 ]] && grep -qi '^retry-after: ' "$HEADERS"; then
+  ok "function rate limit returns 429 with Retry-After"
+else
+  fail "function rate limit" "got $HTTP"
+fi
+rm -f "$HEADERS"
+
 # ── Test 9: create session (model irrelevant — just checks persistence) ────────
 echo "--- Test 9: POST /sessions"
 MODEL="${LEGION_TEST_MODEL:-anthropic/claude-haiku-3-5}"
@@ -152,6 +169,20 @@ if [[ -n "$SESSION_ID" ]]; then
   echo "--- Test 10: GET /sessions/$SESSION_ID"
   R=$(curl -sf "http://localhost:$PORT/sessions/$SESSION_ID")
   echo "$R" | grep -q '"id"' && ok "get session" || fail "get session" "$R"
+
+  R=$(curl -sf -X POST "http://localhost:$PORT/sessions/$SESSION_ID/events" \
+    -H "Content-Type: application/json" -d '{"trigger":"first"}')
+  echo "$R" | grep -q '"status":"resuming"' && ok "first session event allowed" || fail "session event" "$R"
+  HEADERS=$(mktemp)
+  HTTP=$(curl -s -D "$HEADERS" -o /dev/null -w "%{http_code}" -X POST \
+    "http://localhost:$PORT/sessions/$SESSION_ID/events" \
+    -H "Content-Type: application/json" -d '{"trigger":"second"}')
+  if [[ "$HTTP" = 429 ]] && grep -qi '^retry-after: ' "$HEADERS"; then
+    ok "session rate limit returns 429 with Retry-After"
+  else
+    fail "session rate limit" "got $HTTP"
+  fi
+  rm -f "$HEADERS"
 fi
 
 # ── Test 11: GET /sessions/:id/log ────────────────────────────────────────────
@@ -160,6 +191,12 @@ if [[ -n "$SESSION_ID" ]]; then
   R=$(curl -sf "http://localhost:$PORT/sessions/$SESSION_ID/log")
   echo "$R" | grep -q '\[' && ok "get log" || fail "get log" "$R"
 fi
+
+R=$(curl -sf "http://localhost:$PORT/metrics")
+echo "$R" | grep -q 'legion_function_invocations_total{function="add",runtime="bun",outcome="rate_limited"} 1' \
+  && ok "function rate limit metrics" || fail "function rate metrics" "$R"
+echo "$R" | grep -q 'legion_session_rate_limit_rejections_total 1' \
+  && ok "session rate limit metrics" || fail "session rate metrics" "$R"
 
 # ── LLM-dependent tests (skip unless API key set) ─────────────────────────────
 if [[ -z "${ANTHROPIC_API_KEY:-}" ]] && [[ -z "${OPENAI_API_KEY:-}" ]]; then
