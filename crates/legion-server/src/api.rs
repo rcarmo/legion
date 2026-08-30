@@ -3,7 +3,7 @@
 //! Routes:
 //!   POST   /sessions              — create a new session
 //!   GET    /sessions/:id          — get session status
-//!   POST   /sessions/:id/messages — send a user message (triggers resolve)
+//!   POST   /sessions/:id/messages — send a user message + run one resolve turn
 //!   GET    /sessions/:id/log      — get the full event log
 //!   GET    /health                — liveness probe
 
@@ -19,21 +19,25 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use legion_core::{
-    traits::EventStore,
+    traits::{AgentLoopTrait, EventStore},
     types::{Budget, ExternalEvent, RunConfig},
 };
+use legion_loop::driver::LegionLoop;
 use legion_store::SqliteStore;
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── AppState ──────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
-struct AppState {
-    store: SqliteStore,
+pub struct AppState {
+    pub store: SqliteStore,
+    pub lp:    Arc<LegionLoop>,
 }
+
+// ── Request / response types ──────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
 struct CreateSessionRequest {
@@ -55,12 +59,6 @@ struct SendMessageRequest {
     content: String,
 }
 
-#[derive(Debug, Serialize)]
-struct SessionResponse {
-    id:     String,
-    status: String,
-}
-
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
 async fn health() -> Json<Value> {
@@ -71,7 +69,6 @@ async fn create_session(
     State(state): State<Arc<AppState>>,
     Json(req):    Json<CreateSessionRequest>,
 ) -> Result<(StatusCode, Json<Value>), (StatusCode, Json<Value>)> {
-    let run_id = Uuid::new_v4();
     let config = RunConfig {
         model:         req.model.clone(),
         system_prompt: req.system_prompt.clone(),
@@ -86,8 +83,7 @@ async fn create_session(
         }).unwrap_or_default(),
     };
 
-    state.store.create_session(run_id, &config)
-        .await
+    let run_id = state.lp.start(config).await
         .map_err(|e| server_error(e.to_string()))?;
 
     info!(run_id = %run_id, model = %req.model, "session created");
@@ -123,6 +119,9 @@ async fn get_log(
     let entries: Vec<_> = log.iter().map(|e| json!({
         "seq":        e.seq,
         "kind":       format!("{:?}", e.event.kind),
+        "tokens_in":  e.event.tokens_in,
+        "tokens_out": e.event.tokens_out,
+        "wall_ms":    e.event.wall_ms,
         "created_at": e.created_at,
     })).collect();
 
@@ -134,22 +133,32 @@ async fn send_message(
     Path(id):     Path<Uuid>,
     Json(req):    Json<SendMessageRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    use legion_core::types::{TurnEvent, SessionStatus};
-
-    // Append the user message turn
-    state.store.append(id, TurnEvent::user_message(req.content.clone()))
-        .await
-        .map_err(|e| server_error(e.to_string()))?;
-    state.store.set_status(id, SessionStatus::Running)
+    // Inject the user message and run one resolve turn
+    state.lp.resume(id, ExternalEvent::user_message(req.content.clone()))
         .await
         .map_err(|e| server_error(e.to_string()))?;
 
-    info!(run_id = %id, "user message appended");
+    let envelope = state.lp.resolve(id)
+        .await
+        .map_err(|e| {
+            warn!(run_id = %id, err = %e, "resolve error");
+            server_error(e.to_string())
+        })?;
+
+    let response_text = envelope.event.payload
+        .as_ref()
+        .and_then(|p| p.get("content"))
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .to_string();
 
     Ok(Json(json!({
-        "id":     id.to_string(),
-        "status": "running",
-        "note":   "message queued; call GET /sessions/:id for status",
+        "id":           id.to_string(),
+        "seq":          envelope.seq,
+        "response":     response_text,
+        "tokens_in":    envelope.event.tokens_in,
+        "tokens_out":   envelope.event.tokens_out,
+        "wall_ms":      envelope.event.wall_ms,
     })))
 }
 
@@ -164,15 +173,13 @@ fn not_found(msg: String) -> (StatusCode, Json<Value>) {
 
 // ── Router ────────────────────────────────────────────────────────────────────
 
-pub async fn serve(store: SqliteStore, addr: String) -> Result<()> {
-    let state = Arc::new(AppState { store });
-
+pub async fn serve(state: Arc<AppState>, addr: String) -> Result<()> {
     let app = Router::new()
-        .route("/health",                        get(health))
-        .route("/sessions",                      post(create_session))
-        .route("/sessions/:id",                  get(get_session))
-        .route("/sessions/:id/log",              get(get_log))
-        .route("/sessions/:id/messages",         post(send_message))
+        .route("/health",                get(health))
+        .route("/sessions",              post(create_session))
+        .route("/sessions/:id",          get(get_session))
+        .route("/sessions/:id/log",      get(get_log))
+        .route("/sessions/:id/messages", post(send_message))
         .with_state(state)
         .layer(tower_http::trace::TraceLayer::new_for_http());
 

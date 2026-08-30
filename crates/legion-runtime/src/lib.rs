@@ -1,1 +1,22 @@
-// legion-runtime
+//! legion-runtime — function execution engine.
+//!
+//! Executes deployed functions from the namespace.  Two runtimes are supported:
+//!
+//! - **WASM** — via extism/wasmtime (Milestone 3; guarded by `wasm` feature flag)
+//! - **Bun** — subprocess execution of JS/TS functions (Milestone 3)
+//!
+//! For Milestone 2, this crate provides:
+//! - The `FunctionManifest` type (shared between deploy + runtime)
+//! - The `FunctionRuntime` enum and `InvokeRequest`/`InvokeResult` types
+//! - A `BunRuntime` skeleton that shell-invokes Bun and returns stdout as JSON
+//! - A `RegistryBridge` — exposes deployed functions as `legion_core::ToolDefinition`s
+//!   so the agent can call them via the standard tool dispatch path
+
+pub mod manifest;
+pub mod invoke;
+pub mod bun;
+pub mod registry_bridge;
+
+pub use manifest::{FunctionManifest, FunctionRuntime};
+pub use invoke::{InvokeRequest, InvokeResult, Invoker};
+pub use registry_bridge::RegistryBridge;

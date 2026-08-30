@@ -1923,10 +1923,33 @@ dependencies = [
 [[package]]
 name = "legion-namespace"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "legion-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "legion-runtime"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "legion-core",
+ "legion-namespace",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "legion-server"
