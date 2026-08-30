@@ -1,6 +1,6 @@
 # Function Deployment
 
-Functions in Legion are immutable, content-addressed artifacts. Deployment is the act of pushing a blob and registering its hash as a named, versioned function in the Raft-replicated function registry.
+Functions in Legion are immutable, content-addressed artifacts. Deployment is the act of pushing a blob and registering its hash as a named, versioned function in the Raft-replicated function registry. This makes finding functions a mess for humans, but I will take it for now, there will be readable metadata later.
 
 ## Core Principle: The Hash Is the Version
 
