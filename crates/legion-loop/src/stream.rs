@@ -18,14 +18,18 @@ pub enum SessionEvent {
     /// A tool call was issued.
     ToolCall { name: String, call_id: String },
     /// A tool result was received.
-    ToolResult { call_id: String, output: serde_json::Value },
+    ToolResult {
+        call_id: String,
+        output: serde_json::Value,
+        is_error: bool,
+    },
     /// The LLM turn is complete; full response text and usage stats.
     Done {
-        content:    String,
-        seq:        u64,
-        tokens_in:  u32,
+        content: String,
+        seq: u64,
+        tokens_in: u32,
         tokens_out: u32,
-        wall_ms:    u64,
+        wall_ms: u64,
     },
     /// A configured session budget was reached.
     BudgetHalt { budget_field: String },

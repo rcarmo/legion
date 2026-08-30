@@ -2,32 +2,34 @@
 
 Legion is in early design stage, which means that I am still yelling at AI to discuss some of this even after my initial notes (_especially_ because it lost my initial notes and did this). This roadmap tracks work by milestone.
 
-## Milestone 0: Foundation (current)
+Checklist last reconciled with the implementation and test suite on 2026-08-30. A parent item remains unchecked while any of its required children are incomplete.
+
+## Milestone 0: Foundation
 
 **Goal**: Crate skeleton, core traits, and single-node turn store working end-to-end.
 
-- [ ] Cargo workspace scaffold with all 8 crates
-- [ ] `legion-core`: types + traits (no I/O)
-  - [ ] `TurnEvent`, `TurnEnvelope`, `RunId`, `SeqNum`, `SessionStatus`
-  - [ ] `EventStore` trait
-  - [ ] `AgentLoop` trait (4 verbs: start, recover, resume, resolve)
-  - [ ] `ToolRegistry` trait
-  - [ ] `Budget`, `RunConfig`, `TurnPhase`
-  - [ ] Test doubles (`MemoryEventStore`, `EchoToolRegistry`)
-- [ ] `legion-store`: SQLite-backed `EventStore` (single-node, no Raft yet)
-  - [ ] `rusqlite` + WAL mode
-  - [ ] Migrations: `0001_initial.sql`, `0002_functions.sql`
-  - [ ] Hash chain implementation
-  - [ ] `read_log` with chain verification
-  - [ ] `fork` implementation
+- [x] Cargo workspace scaffold with all 8 crates
+- [x] `legion-core`: types + traits (no I/O)
+  - [x] `TurnEvent`, `TurnEnvelope`, `RunId`, `SeqNum`, `SessionStatus`
+  - [x] `EventStore` trait
+  - [x] `AgentLoop` trait (4 verbs: start, recover, resume, resolve)
+  - [x] `ToolRegistry` trait
+  - [x] `Budget`, `RunConfig`, `TurnPhase`
+  - [x] Test doubles (`MemoryEventStore`, `EchoToolRegistry`)
+- [x] `legion-store`: SQLite-backed `EventStore` (single-node, no Raft yet)
+  - [x] `rusqlite` + WAL mode
+  - [x] Migrations: `0001_initial.sql`, `0002_functions.sql`
+  - [x] Hash chain implementation
+  - [x] `read_log` with chain verification
+  - [x] `fork` implementation
 - [ ] `legion-loop`: Basic agent loop on rs-ai
-  - [ ] `TurnPhase` state machine
-  - [ ] rs-ai `EventStream` integration
-  - [ ] Write-ahead intent logging
-  - [ ] Effect classification
-  - [ ] Budget enforcement
-  - [ ] Crash recovery from log
-- [ ] Unit tests for loop + store with `MemoryEventStore`
+  - [ ] `TurnPhase` state machine (the enum exists; the driver does not use it yet)
+  - [x] rs-ai `EventStream` integration
+  - [x] Write-ahead intent logging
+  - [x] Effect classification
+  - [x] Budget enforcement
+  - [x] Crash recovery from log
+- [x] Unit tests for loop + store with `MemoryEventStore`
 
 **Exit criteria**: An agent session can run to completion and be replayed from the event log on a single node.
 
@@ -38,19 +40,19 @@ Legion is in early design stage, which means that I am still yelling at AI to di
 **Goal**: 3-node cluster with Raft-replicated state and mDNS discovery.
 
 - [ ] `legion-cluster`: iroh + mDNS bootstrap
-  - [ ] iroh endpoint setup + keypair persistence
-  - [ ] `iroh-mdns-address-lookup` integration
-  - [ ] `mdns-sd` Bonjour registration
-  - [ ] `iroh-gossip` membership
-  - [ ] Raft bootstrap logic (join vs. single-node)
+  - [x] iroh endpoint setup + keypair persistence
+  - [x] `iroh-mdns-address-lookup` integration
+  - [x] `mdns-sd` Bonjour registration
+  - [x] `iroh-gossip` membership
+  - [ ] Raft bootstrap logic (discovery decides join vs. single-node, but the join handshake is not wired)
 - [ ] `legion-store`: Swap SQLite for hiqlite
-  - [ ] hiqlite `Client` wrapping
-  - [ ] fjall as Raft log store
-  - [ ] All `EventStore` methods over hiqlite
+  - [x] hiqlite `Client` wrapping
+  - [x] fjall as Raft log store (through hiqlite)
+  - [x] All `EventStore` methods over hiqlite
   - [ ] `listen_notify_local` for park/resume wakeup
   - [ ] `dlock` for leader-only operations
 - [ ] Integration test: 3-node cluster, session survives leader kill
-- [ ] `legion-server`: Node startup sequence
+- [x] `legion-server`: Node startup sequence
 
 **Exit criteria**: 3-node cluster forms automatically on LAN; any node can resume a session after another node crashes.
 
@@ -60,14 +62,14 @@ Legion is in early design stage, which means that I am still yelling at AI to di
 
 **Goal**: All cluster resources accessible via 9P paths.
 
-- [ ] `legion-namespace`: jetstream integration
+- [ ] `legion-namespace`: jetstream integration (the in-process namespace tree exists; the 9P projection does not)
   - [ ] `LegionNamespace` implementing jetstream `FileSystem`
   - [ ] All path handlers (see [07-9p-namespace.md](07-9p-namespace.md))
   - [ ] Remote proxy (`/peers/<key>/...`)
   - [ ] Streaming reads for `/sessions/<id>/turns`
 - [ ] `legion-server`: Expose namespace on iroh QUIC transport
-- [ ] REST API shim on port 8080
-- [ ] CLI: `legion session`, `legion cluster`, `legion call`
+- [x] REST API shim on port 8080
+- [x] CLI: `legion session`, `legion cluster`, `legion call`
 - [ ] Integration test: full session via 9P read/write
 
 **Exit criteria**: A human can run a full agent session using only `9p read/write` shell commands.
@@ -78,22 +80,22 @@ Legion is in early design stage, which means that I am still yelling at AI to di
 
 **Goal**: Functions can be deployed as WASM or Bun bundles and invoked from the namespace.
 
-- [ ] `legion-deploy`: CAS deployment
+- [ ] `legion-deploy`: CAS deployment (the current pipeline persists versioned manifests and code on local disk)
   - [ ] iroh-blobs integration
-  - [ ] `push`, `register`, `route`, `promote` commands
+  - [ ] `push`, `register`, `route`, `promote` commands (`push` is implemented)
   - [ ] Canary weighted routing
 - [ ] `legion-runtime`: WASM executor
-  - [ ] wasmtime + extism integration
+  - [x] wasmtime + extism integration
   - [ ] Host functions (log, read, write, budget)
   - [ ] Fuel-based CPU limit
   - [ ] Memory limit enforcement
-  - [ ] Blob fetch + local cache
+  - [ ] Blob fetch + local cache (local cache exists; blob fetch does not)
 - [ ] `legion-runtime`: Bun executor
-  - [ ] Subprocess spawn + stdio protocol
-  - [ ] Timeout + SIGKILL
+  - [x] Subprocess spawn + stdio protocol
+  - [x] Timeout + process termination
   - [ ] Environment variable injection
-- [ ] CLI: `legion deploy`
-- [ ] Integration test: deploy and invoke WASM + Bun functions
+- [x] CLI: `legion deploy`
+- [x] Integration tests: deploy and invoke WASM and Bun functions
 
 **Exit criteria**: A Bun function and a WASM function can be deployed and invoked via `legion call` and via the 9P namespace.
 
@@ -103,14 +105,14 @@ Legion is in early design stage, which means that I am still yelling at AI to di
 
 **Goal**: Production-ready cluster with observability, backup, and security.
 
-- [ ] TLS for all iroh connections (built-in; verify config)
-- [ ] Authentication for namespace access (capability tokens)
+- [x] Authenticated encryption for iroh connections (built into iroh QUIC endpoints)
+- [ ] Authentication for namespace access (capability tokens; REST API-key authentication exists)
 - [ ] hiqlite S3 backup integration
 - [ ] OpenTelemetry traces for agent loop steps
-- [ ] Metrics: turn latency, token counts, function invocation times
-- [ ] `legion session reconcile` — resolve `pending_reconciliation` sessions
-- [ ] Rate limiting per session / per function
-- [ ] `legion-server` systemd unit file
+- [x] Metrics: turn latency, token counts, function invocation times
+- [x] `legion session reconcile` — resolve `pending_reconciliation` sessions
+- [x] Rate limiting per session / per function
+- [x] `legion-server` systemd unit file
 - [ ] Comprehensive load tests (hiqlite bench: 24.5k inserts/s target)
 
 ---
