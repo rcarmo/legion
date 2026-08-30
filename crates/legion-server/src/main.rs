@@ -1,6 +1,7 @@
 //! Legion daemon — the executable that wires all crates together.
 
 mod api;
+mod auth;
 mod config;
 mod tools;
 
@@ -123,8 +124,10 @@ async fn main() -> Result<()> {
     info!("agent loop ready (model: {})", cfg.model.default_model);
 
     // ── REST API ──────────────────────────────────────────────────────────────
+    let api_key = std::env::var("LEGION_API_KEY").ok().or(cfg.api_key.clone());
+    if api_key.is_some() { info!("API key authentication enabled"); } else { warn!("no API key set — server is open"); }
     let state = Arc::new(AppState { store, lp, deployer, namespace, invoker: bun_runtime as Arc<dyn legion_runtime::invoke::Invoker> });
     let addr  = format!("0.0.0.0:{}", cfg.cluster.api_port);
-    api::serve(state, addr).await?;
+    api::serve(state, addr, api_key).await?;
     Ok(())
 }

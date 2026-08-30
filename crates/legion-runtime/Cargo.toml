@@ -6,6 +6,7 @@ license.workspace    = true
 repository.workspace = true
 rust-version.workspace = true
 
+
 [dependencies]
 legion-core      = { path = "../legion-core" }
 legion-namespace = { path = "../legion-namespace" }
@@ -17,4 +18,5 @@ anyhow      = { workspace = true }
 tracing     = { workspace = true }
 async-trait = { workspace = true }
 bytes       = { workspace = true }
-uuid        = { workspace = true }
+extism  = { version = "1", optional = true }
+uuid    = { workspace = true }

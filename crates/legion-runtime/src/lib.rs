@@ -15,6 +15,8 @@
 pub mod manifest;
 pub mod invoke;
 pub mod bun;
+#[cfg(feature = "wasm")]
+pub mod wasm;
 pub mod registry_bridge;
 
 pub use manifest::{FunctionManifest, FunctionRuntime};

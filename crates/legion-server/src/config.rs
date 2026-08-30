@@ -13,6 +13,10 @@ pub struct ServerConfig {
     pub cluster: NodeConfig,
     #[serde(default)]
     pub model: ModelConfig,
+    /// Optional API key. Set to require `Authorization: Bearer <key>` on all requests.
+    /// Also read from LEGION_API_KEY env var (env takes precedence).
+    #[serde(default)]
+    pub api_key: Option<String>,
 }
 
 /// Model / provider settings.

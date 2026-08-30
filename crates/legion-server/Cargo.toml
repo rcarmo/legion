@@ -19,6 +19,7 @@ legion-deploy    = { path = "../legion-deploy" }
 legion-namespace = { path = "../legion-namespace" }
 legion-runtime   = { path = "../legion-runtime" }
 
+futures          = { workspace = true }
 tokio            = { workspace = true }
 anyhow           = { workspace = true }
 serde            = { workspace = true }

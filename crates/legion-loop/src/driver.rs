@@ -28,6 +28,8 @@ use legion_core::{
 use crate::context::build_messages;
 use crate::recovery::{recover_session, RecoveryOutcome};
 
+use crate::stream::SessionEvent;
+
 // ── LegionLoop ────────────────────────────────────────────────────────────────
 
 /// Stateless agent loop that drives sessions stored in an `EventStore`.
@@ -401,5 +403,125 @@ mod tests {
         lp.recover(run_id).await.unwrap();
         let status = lp.store.session_status(run_id).await.unwrap();
         assert!(matches!(status, SessionStatus::Idle));
+    }
+}
+
+impl LegionLoop {
+    /// Streaming variant of `resolve`: injects a user message, runs one turn,
+    /// and emits `SessionEvent`s via the returned channel receiver.
+    ///
+    /// The caller should poll the receiver and forward events to the SSE stream.
+    /// The channel closes (returns `None`) when the turn completes or errors.
+    pub fn stream_resolve(
+        self: Arc<Self>,
+        run_id:  RunId,
+        message: String,
+    ) -> tokio::sync::mpsc::Receiver<SessionEvent> {
+        let (tx, rx) = tokio::sync::mpsc::channel::<SessionEvent>(32);
+        let lp       = self.clone();
+
+        tokio::spawn(async move {
+            // Inject user message
+            if let Err(e) = lp.store.append(run_id, TurnEvent::user_message(message)).await {
+                let _ = tx.send(SessionEvent::Error { message: e.to_string() }).await;
+                return;
+            }
+
+            // Load config
+            let log = match lp.store.read_log(run_id).await {
+                Ok(l)  => l,
+                Err(e) => { let _ = tx.send(SessionEvent::Error { message: e.to_string() }).await; return; }
+            };
+            let config: RunConfig = match log.iter().find_map(|e| {
+                if matches!(e.event.kind, TurnEventKind::SessionStarted) {
+                    e.event.payload.as_ref().and_then(|p| serde_json::from_value(p.clone()).ok())
+                } else { None }
+            }) {
+                Some(c) => c,
+                None => { let _ = tx.send(SessionEvent::Error { message: "no config".into() }).await; return; }
+            };
+
+            // Build context + tools
+            let recent   = match lp.store.read_recent(run_id, lp.context_window).await {
+                Ok(r)  => r,
+                Err(e) => { let _ = tx.send(SessionEvent::Error { message: e.to_string() }).await; return; }
+            };
+            let messages = crate::context::build_messages(&recent);
+            let rs_tools: Vec<rs_ai::types::Tool> = lp.tools.definitions().iter().map(|td| {
+                rs_ai::types::Tool {
+                    name:        td.name.clone(),
+                    description: td.description.clone(),
+                    parameters:  td.parameters.clone(),
+                    constrained_sampling: None,
+                }
+            }).collect();
+            let ctx  = rs_ai::types::Context { system_prompt: config.system_prompt.clone(), messages, tools: rs_tools };
+            let opts = rs_ai::types::StreamOptions::default();
+
+            // Look up model
+            let parts: Vec<&str> = config.model.splitn(2, '/').collect();
+            let (provider, mid) = if parts.len() == 2 { (parts[0], parts[1]) } else { ("", config.model.as_str()) };
+            let model = match rs_ai::registry::get_model(provider, mid) {
+                Some(m) => m,
+                None => {
+                    let _ = tx.send(SessionEvent::Error { message: format!("model not found: {}", config.model) }).await;
+                    return;
+                }
+            };
+
+            // Write-ahead
+            let _ = lp.store.append(run_id, TurnEvent::model_call_intent()).await;
+            let _ = lp.store.set_status(run_id, SessionStatus::Running).await;
+
+            // Stream
+            let start  = std::time::Instant::now();
+            let mut stream = rs_ai::registry::stream(&model, &ctx, &opts);
+            let mut text_buf    = String::new();
+            let mut tokens_in   = 0u32;
+            let mut tokens_out  = 0u32;
+            let mut last_seq    = 0u64;
+
+            while let Some(ev) = stream.next().await {
+                match ev {
+                    rs_ai::events::Event::TextDelta { delta } => {
+                        text_buf.push_str(&delta);
+                        let _ = tx.send(SessionEvent::TextDelta { delta }).await;
+                    }
+                    rs_ai::events::Event::ThinkingDelta { delta } => {
+                        let _ = tx.send(SessionEvent::ThinkingDelta { delta }).await;
+                    }
+                    rs_ai::events::Event::ToolCallEnd { id, name, .. } => {
+                        let _ = tx.send(SessionEvent::ToolCall { name, call_id: id }).await;
+                    }
+                    rs_ai::events::Event::Done { message, .. } => {
+                        if let Some(u) = message.usage { tokens_in = u.input; tokens_out = u.output; }
+                        let wall_ms = start.elapsed().as_millis() as u64;
+                        let ev = TurnEvent::assistant_message(
+                            serde_json::json!({ "content": text_buf }),
+                            &config.model, tokens_in, tokens_out, wall_ms,
+                        );
+                        if let Ok(seq) = lp.store.append(run_id, ev).await {
+                            last_seq = seq;
+                        }
+                        let _ = lp.store.set_status(run_id, SessionStatus::Completed).await;
+                        let _ = tx.send(SessionEvent::Done {
+                            content: text_buf.clone(),
+                            seq:     last_seq,
+                            tokens_in,
+                            tokens_out,
+                            wall_ms,
+                        }).await;
+                        break;
+                    }
+                    rs_ai::events::Event::Error { error, .. } => {
+                        let _ = tx.send(SessionEvent::Error { message: error.to_string() }).await;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        rx
     }
 }

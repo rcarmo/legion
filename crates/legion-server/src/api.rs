@@ -13,7 +13,8 @@ use anyhow::Result;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    response::Json,
+    middleware,
+    response::{Json, Sse, sse::Event as SseEvent},
     routing::{get, post},
     Router,
 };
@@ -27,7 +28,7 @@ use legion_core::{
     types::{Budget, ExternalEvent, RunConfig},
 };
 use legion_deploy::{DeployJob, DeployPipeline};
-use legion_loop::driver::LegionLoop;
+use legion_loop::{driver::LegionLoop, SessionEvent};
 use legion_namespace::{Namespace, NodeKind};
 use legion_runtime::{invoke::{InvokeRequest, Invoker}, manifest::FunctionRuntime};
 use legion_store::SqliteStore;
@@ -228,6 +229,34 @@ async fn delete_function(
     Ok(Json(json!({ "name": name, "deleted": true })))
 }
 
+/// GET /sessions/:id/stream — SSE stream of a single resolve turn.
+/// Client sends the user message as a query param `?message=...` or in headers.
+async fn stream_session(
+    State(state): State<Arc<AppState>>,
+    Path(id):     Path<Uuid>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Sse<impl futures::Stream<Item = Result<SseEvent, std::convert::Infallible>>> {
+    use futures::stream;
+    use std::convert::Infallible;
+
+    let message = params.get("message").cloned().unwrap_or_default();
+    let mut rx  = state.lp.clone().stream_resolve(id, message);
+
+    let sse_stream = stream::unfold(rx, |mut rx| async move {
+        match rx.recv().await {
+            None     => None,
+            Some(ev) => {
+                let json  = serde_json::to_string(&ev).unwrap_or_default();
+                let event = SseEvent::default().data(json);
+                Some((Ok::<SseEvent, Infallible>(event), rx))
+            }
+        }
+    });
+
+    Sse::new(sse_stream)
+        .keep_alive(axum::response::sse::KeepAlive::default())
+}
+
 async fn invoke_function(
     State(state): State<Arc<AppState>>,
     Path(name):   Path<String>,
@@ -297,18 +326,25 @@ fn not_found(msg: String) -> (StatusCode, Json<Value>) {
 
 // ── Router ────────────────────────────────────────────────────────────────────
 
-pub async fn serve(state: Arc<AppState>, addr: String) -> Result<()> {
+pub async fn serve(state: Arc<AppState>, addr: String, api_key: Option<String>) -> Result<()> {
+    use crate::auth::require_api_key;
+
     let app = Router::new()
-        .route("/health",                        get(health))
-        .route("/sessions",                      post(create_session))
-        .route("/sessions/:id",                  get(get_session))
-        .route("/sessions/:id/log",              get(get_log))
-        .route("/sessions/:id/messages",         post(send_message))
-        .route("/sessions/:id/events",           post(session_webhook))
-        .route("/functions",                     get(list_functions).post(deploy_function))
-        .route("/functions/:name",               axum::routing::delete(delete_function))
-        .route("/functions/:name/invoke",        post(invoke_function))
+        .route("/health",                          get(health))
+        .route("/sessions",                        post(create_session))
+        .route("/sessions/:id",                    get(get_session))
+        .route("/sessions/:id/log",                get(get_log))
+        .route("/sessions/:id/messages",           post(send_message))
+        .route("/sessions/:id/stream",             get(stream_session))
+        .route("/sessions/:id/events",             post(session_webhook))
+        .route("/functions",                       get(list_functions).post(deploy_function))
+        .route("/functions/:name",                 axum::routing::delete(delete_function))
+        .route("/functions/:name/invoke",          post(invoke_function))
         .with_state(state)
+        .route_layer(middleware::from_fn_with_state(
+            api_key,
+            require_api_key,
+        ))
         .layer(tower_http::trace::TraceLayer::new_for_http());
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
