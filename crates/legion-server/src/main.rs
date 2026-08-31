@@ -294,7 +294,7 @@ async fn run_server() -> Result<()> {
 
     // ── Deploy pipeline ───────────────────────────────────────────────────────
     let fn_root = cfg.cluster.data_dir.join("fn");
-    let deployer = Arc::new(DeployPipeline::new(fn_root.clone(), namespace.clone()));
+    let deployer = Arc::new(DeployPipeline::open(fn_root.clone(), namespace.clone()).await?);
 
     // ── Tool registries ───────────────────────────────────────────────────────
     let invocation_metrics = Arc::new(InvocationMetrics::default());

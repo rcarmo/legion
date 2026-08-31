@@ -151,6 +151,7 @@ mod tests {
             name: name.into(),
             runtime,
             version: "1.0.0".into(),
+            artifact_cid: None,
             deployed_at: 0,
             parameters: serde_json::json!({ "type": "object" }),
             description: format!("{name} test function"),

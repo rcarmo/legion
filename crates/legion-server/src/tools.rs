@@ -240,6 +240,7 @@ impl BuiltinToolRegistry {
             name:        name.to_string(),
             runtime:     runtime.clone(),
             version:     "1.0.0".into(),
+            artifact_cid: None,
             deployed_at: chrono::Utc::now().timestamp_millis(),
             parameters:  params,
             description: description.clone(),

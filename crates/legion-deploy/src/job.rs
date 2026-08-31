@@ -50,6 +50,7 @@ pub struct DeployOutcome {
     pub name:    String,
     pub status:  DeployStatus,
     pub path:    Option<String>,
+    pub artifact_cid: Option<String>,
     pub error:   Option<String>,
     pub wall_ms: u64,
 }

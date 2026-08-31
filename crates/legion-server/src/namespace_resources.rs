@@ -7,7 +7,6 @@ use legion_cluster::ClusterNode;
 use legion_core::error::{LegionError, Result};
 use legion_deploy::{DeployJob, DeployPipeline};
 use legion_namespace::{ClusterNamespace, DeployNamespace, Namespace, NodeKind};
-use legion_runtime::manifest::FunctionRuntime;
 use serde_json::{Value, json};
 
 #[cfg(feature = "distributed")]
@@ -143,16 +142,18 @@ impl ClusterNamespace for ServerClusterNamespace {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use legion_runtime::manifest::FunctionRuntime;
     use tempfile::tempdir;
 
     #[tokio::test]
     async fn deployment_paths_register_and_read_blobs() {
         let dir = tempdir().unwrap();
         let namespace = Namespace::new();
-        let deployer = Arc::new(DeployPipeline::new(
-            dir.path().join("fn"),
-            namespace.clone(),
-        ));
+        let deployer = Arc::new(
+            DeployPipeline::open(dir.path().join("fn"), namespace.clone())
+                .await
+                .unwrap(),
+        );
         let resources = ServerDeployNamespace::new(deployer, namespace);
         let job = DeployJob::new("hello", FunctionRuntime::Bun, "test", "export default 1");
 

@@ -80,8 +80,8 @@ Checklist last reconciled with the implementation and test suite on 2026-08-31. 
 
 **Goal**: Functions can be deployed as WASM or Bun bundles and invoked from the namespace.
 
-- [ ] `legion-deploy`: CAS deployment (the current pipeline persists versioned manifests and code on local disk)
-  - [ ] iroh-blobs integration
+- [x] `legion-deploy`: CAS deployment (artifacts are stored by BLAKE3 CID and materialized locally for execution)
+  - [x] iroh-blobs integration
   - [ ] `push`, `register`, `route`, `promote` commands (`push` is implemented)
   - [ ] Canary weighted routing
 - [ ] `legion-runtime`: WASM executor

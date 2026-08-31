@@ -9,17 +9,21 @@ use tracing::{info, warn};
 use legion_namespace::Namespace;
 use legion_runtime::manifest::{FunctionManifest, FunctionRuntime};
 
+use crate::blob_store::DeployBlobStore;
 use crate::job::{DeployJob, DeployOutcome, DeployStatus};
 
 /// Validates and deploys functions into the namespace + data directory.
 pub struct DeployPipeline {
     pub fn_root:   PathBuf,
     pub namespace: Namespace,
+    blob_store: DeployBlobStore,
 }
 
 impl DeployPipeline {
-    pub fn new(fn_root: PathBuf, namespace: Namespace) -> Self {
-        Self { fn_root, namespace }
+    pub async fn open(fn_root: PathBuf, namespace: Namespace) -> Result<Self> {
+        let blob_root = fn_root.parent().unwrap_or(&fn_root).join("blobs");
+        let blob_store = DeployBlobStore::open(blob_root).await?;
+        Ok(Self { fn_root, namespace, blob_store })
     }
 
     /// Run the full deploy pipeline for a job.
@@ -33,6 +37,7 @@ impl DeployPipeline {
                 name:    job.name,
                 status:  DeployStatus::Failed,
                 path:    None,
+                artifact_cid: None,
                 error:   Some("name must match [a-z0-9-]+".into()),
                 wall_ms: start.elapsed().as_millis() as u64,
             };
@@ -44,16 +49,22 @@ impl DeployPipeline {
             FunctionRuntime::Bun  => "ts",
         };
 
-        // Persist code to disk
+        let artifact = match (&job.runtime, &job.wasm_bytes) {
+            (FunctionRuntime::Wasm, Some(bytes)) => bytes.clone(),
+            _ => job.code.as_bytes().to_vec(),
+        };
+        let artifact_cid = match self.blob_store.put(artifact.clone()).await {
+            Ok(cid) => cid,
+            Err(error) => return failed(job, start, format!("store artifact: {error}")),
+        };
+
+        // Materialize the active version locally for the execution runtimes.
         let fn_dir = self.fn_root.join(&job.name);
         if let Err(e) = std::fs::create_dir_all(&fn_dir) {
             return failed(job, start, format!("create dir: {e}"));
         }
         let code_path = fn_dir.join(format!("index.{ext}"));
-        let write_result = match (&job.runtime, &job.wasm_bytes) {
-            (FunctionRuntime::Wasm, Some(bytes)) => std::fs::write(&code_path, bytes),
-            _ => std::fs::write(&code_path, &job.code),
-        };
+        let write_result = std::fs::write(&code_path, &artifact);
         if let Err(e) = write_result {
             return failed(job, start, format!("write code: {e}"));
         }
@@ -65,6 +76,7 @@ impl DeployPipeline {
             name:        job.name.clone(),
             runtime:     job.runtime.clone(),
             version:     "1.0.0".into(),
+            artifact_cid: Some(artifact_cid.clone()),
             deployed_at: chrono::Utc::now().timestamp_millis(),
             parameters:  job.parameters.clone(),
             description: job.description.clone(),
@@ -82,12 +94,18 @@ impl DeployPipeline {
             }
         }
 
+        self.namespace.set_json(
+            &format!("/deploy/blobs/{artifact_cid}"),
+            serde_json::json!({ "cid": artifact_cid, "size": artifact.len() }),
+        ).await;
+
         // Add deploy history entry
         let history_path = format!("/deploy/history/{}", job.id);
         self.namespace.set_json(&history_path, serde_json::json!({
             "job_id":       job.id.to_string(),
             "name":         job.name,
             "status":       "success",
+            "artifact_cid": artifact_cid,
             "deployed_at":  manifest.deployed_at,
         })).await;
 
@@ -96,6 +114,7 @@ impl DeployPipeline {
             name:    manifest.name,
             status:  DeployStatus::Success,
             path:    Some(code_path.display().to_string()),
+            artifact_cid: Some(artifact_cid),
             error:   None,
             wall_ms: start.elapsed().as_millis() as u64,
         }
@@ -128,6 +147,7 @@ fn failed(job: DeployJob, start: Instant, error: String) -> DeployOutcome {
         name:    job.name,
         status:  DeployStatus::Failed,
         path:    None,
+        artifact_cid: None,
         error:   Some(error),
         wall_ms: start.elapsed().as_millis() as u64,
     }
@@ -138,14 +158,15 @@ fn failed(job: DeployJob, start: Instant, error: String) -> DeployOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use legion_namespace::NodeKind;
     use legion_runtime::manifest::FunctionRuntime;
     use tempfile::TempDir;
 
     async fn pipeline(dir: &TempDir) -> DeployPipeline {
-        DeployPipeline::new(
+        DeployPipeline::open(
             dir.path().join("fn"),
             Namespace::new(),
-        )
+        ).await.unwrap()
     }
 
     #[tokio::test]
@@ -161,6 +182,7 @@ mod tests {
         );
         let outcome = p.deploy(job).await;
         assert_eq!(outcome.status, DeployStatus::Success);
+        assert!(outcome.artifact_cid.is_some());
         assert!(outcome.path.unwrap().ends_with("index.ts"));
     }
 
@@ -177,18 +199,27 @@ mod tests {
     async fn deploy_registers_manifest_in_namespace() {
         let dir  = tempfile::tempdir().unwrap();
         let ns   = Namespace::new();
-        let p    = DeployPipeline::new(dir.path().join("fn"), ns.clone());
+        let p    = DeployPipeline::open(dir.path().join("fn"), ns.clone()).await.unwrap();
         let job  = DeployJob::new("greet", FunctionRuntime::Bun, "A greeter", "export default () => ({})");
-        p.deploy(job).await;
-        let node = ns.get("/fn/greet/manifest.json").await;
-        assert!(node.is_some(), "manifest must be registered in namespace");
+        let outcome = p.deploy(job).await;
+        let node = ns.get("/fn/greet/manifest.json").await.unwrap();
+        let NodeKind::Json(manifest) = node.kind else {
+            panic!("manifest must be JSON");
+        };
+        assert_eq!(manifest["artifact_cid"], outcome.artifact_cid.unwrap());
+        assert!(
+            ns.get(&format!("/deploy/blobs/{}", manifest["artifact_cid"].as_str().unwrap()))
+                .await
+                .is_some(),
+            "artifact metadata must be registered in namespace",
+        );
     }
 
     #[tokio::test]
     async fn undeploy_removes_from_namespace() {
         let dir = tempfile::tempdir().unwrap();
         let ns  = Namespace::new();
-        let p   = DeployPipeline::new(dir.path().join("fn"), ns.clone());
+        let p   = DeployPipeline::open(dir.path().join("fn"), ns.clone()).await.unwrap();
         let job = DeployJob::new("temp", FunctionRuntime::Bun, "", "//noop");
         p.deploy(job).await;
         p.undeploy("temp").await.unwrap();

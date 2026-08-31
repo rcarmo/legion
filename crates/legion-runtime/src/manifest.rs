@@ -21,6 +21,9 @@ pub struct FunctionManifest {
     pub runtime:      FunctionRuntime,
     /// Semver string, e.g. "1.0.0".
     pub version:      String,
+    /// iroh-blobs BLAKE3 content identifier for the deployed artifact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_cid: Option<String>,
     /// Unix timestamp (ms) of last deploy.
     pub deployed_at:  i64,
     /// JSON Schema for the function's input parameters (passed to LLM as tool schema).
