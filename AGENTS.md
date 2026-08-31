@@ -24,6 +24,8 @@ projects/legion/
 
 ## Development Principles
 
+- **Use the root `Makefile` for all build and test flows.** It keeps one shared `target/`, runs Cargo sequentially, checks free space, and clears repository-local junk. Prefer `make verify-m3`, `make check`, or a targeted `make test-*` target over direct Cargo commands.
+- **Do not create crate-local or fixture-local Cargo target directories.** `CARGO_TARGET_DIR` is centralized at the workspace root. Run `make clean-junk` after interrupted work and `make clean` when build artifacts are no longer needed.
 - **Read before editing.** Never edit blind.
 - **No I/O in legion-core.** All traits defined there must be pure.
 - **legion-store is the only crate that touches disk or network for persistence.** Other crates depend on the trait, not the impl.

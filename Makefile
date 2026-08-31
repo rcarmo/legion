@@ -1,58 +1,119 @@
-.PHONY: build test lint check clean fmt docs integration-test cli-integration-test wasm-integration-test install uninstall
+SHELL := /bin/bash
+.DEFAULT_GOAL := help
 
-build:
-	cargo build --workspace
+# Keep every Cargo invocation—including fixture builds—in one reusable tree.
+export CARGO_TARGET_DIR := $(CURDIR)/target
+CARGO ?= $(HOME)/.cargo/bin/cargo
+MIN_FREE_GB ?= 6
+TARGET_WARN_GB ?= 10
 
-release:
-	cargo build --workspace --release
+.PHONY: help preflight postflight space build release test lint fmt fmt-check check verify-m3 \
+	clean clean-junk distclean docs dev server integration-test cli-integration-test \
+	wasm-fixture wasm-integration-test install uninstall test-core test-store test-loop \
+	test-namespace test-deploy test-cluster test-runtime-extism
 
-test:
-	cargo test --workspace
+help:
+	@printf '%s\n' \
+	  'Legion build entry points (all use ./target):' \
+	  '  make verify-m3           One-pass Milestone 3 verification' \
+	  '  make check               Format, lint, and test the workspace' \
+	  '  make integration-test    Build once, then run Bun integration tests' \
+	  '  make wasm-integration-test  Build server/fixture once, then smoke test' \
+	  '  make clean-junk          Remove temp files and accidental nested targets' \
+	  '  make clean               Remove Cargo build output' \
+	  '  make space               Show free space and build-tree size'
 
-lint:
-	cargo clippy --workspace --all-targets -- -D warnings
+preflight: clean-junk
+	@free_gb=$$(df -Pk "$(CURDIR)" | awk 'NR==2 {print int($$4/1024/1024)}'); \
+	 if (( free_gb < $(MIN_FREE_GB) )); then \
+	   echo "ERROR: only $${free_gb} GiB free; need $(MIN_FREE_GB) GiB before building" >&2; exit 1; \
+	 fi
+
+postflight:
+	@$(MAKE) --no-print-directory clean-junk
+	@size_gb=$$(du -sk "$(CARGO_TARGET_DIR)" 2>/dev/null | awk '{print int($$1/1024/1024)}'); \
+	 if (( size_gb >= $(TARGET_WARN_GB) )); then \
+	   echo "WARNING: target is $${size_gb} GiB (threshold $(TARGET_WARN_GB) GiB); run 'make clean' when finished" >&2; \
+	 fi
+
+space:
+	@df -h "$(CURDIR)"
+	@du -sh "$(CARGO_TARGET_DIR)" 2>/dev/null || true
+
+build: preflight
+	$(CARGO) build --workspace
+	@$(MAKE) --no-print-directory postflight
+
+release: preflight
+	$(CARGO) build --workspace --release
+	@$(MAKE) --no-print-directory postflight
+
+test: preflight
+	$(CARGO) test --workspace
+	@$(MAKE) --no-print-directory postflight
+
+lint: preflight
+	$(CARGO) clippy --workspace --all-targets -- -D warnings
+	@$(MAKE) --no-print-directory postflight
 
 fmt:
-	cargo fmt --all
+	$(CARGO) fmt --all
 
-check:
-	cargo fmt --all -- --check
-	cargo clippy --workspace --all-targets -- -D warnings
-	cargo test --workspace
+fmt-check:
+	$(CARGO) fmt --all -- --check
+
+# Sequential by design: never launch overlapping Cargo builds on this VM.
+check: preflight
+	$(CARGO) fmt --all -- --check
+	$(CARGO) clippy --workspace --all-targets -- -D warnings
+	$(CARGO) test --workspace
+	@$(MAKE) --no-print-directory postflight
+
+# Milestone 3's narrow gate. Cargo reuses the same artifacts for the server and
+# Extism-enabled runtime tests; integration scripts do not invoke Cargo again.
+verify-m3: preflight
+	@git diff --check
+	$(CARGO) test -p legion-runtime --features extism --no-fail-fast
+	$(CARGO) build -p legion-server
+	./tests/integration/run.sh
+	$(MAKE) --no-print-directory wasm-fixture
+	./tests/integration/wasm_server_smoke.sh
+	@$(MAKE) --no-print-directory postflight
 
 clean:
-	cargo clean
+	$(CARGO) clean
+	@$(MAKE) --no-print-directory clean-junk
 
-docs:
-	cargo doc --workspace --no-deps --open
+# Safe, repository-local housekeeping. Do not delete the shared target here: it
+# is the cache that prevents repeated full builds.
+clean-junk:
+	@find "$(CURDIR)" -mindepth 2 -type d -name target ! -path "$(CARGO_TARGET_DIR)" -prune -exec rm -rf {} + 2>/dev/null || true
+	@find "$(CURDIR)" -type f \( -name '*.tmp' -o -name '*.temp' -o -name 'core' -o -name 'core.*' \) -delete 2>/dev/null || true
 
-# Run a single-node server in dev mode
-dev:
-	RUST_LOG=legion=debug,hiqlite=info \
-	cargo run -p legion-server
+# Explicit full reset, including Cargo output and repository-local junk.
+distclean: clean
 
-# Run tests for a specific crate
-test-core:
-	cargo test -p legion-core
+# Build the server binary only.
+server: preflight
+	$(CARGO) build -p legion-server
+	@$(MAKE) --no-print-directory postflight
 
-test-store:
-	cargo test -p legion-store
+# Run a single-node server in dev mode.
+dev: preflight
+	RUST_LOG=legion=debug,hiqlite=info $(CARGO) run -p legion-server
 
-test-loop:
-	cargo test -p legion-loop
+# Targeted tests.
+test-core test-store test-loop test-namespace test-deploy test-cluster test-runtime-extism: preflight
+	@case "$@" in \
+	 test-core) package=legion-core;; test-store) package=legion-store;; \
+	 test-loop) package=legion-loop;; test-namespace) package=legion-namespace;; \
+	 test-deploy) package=legion-deploy;; test-cluster) package=legion-cluster;; \
+	 test-runtime-extism) package='legion-runtime --features extism';; esac; \
+	 threads=''; [[ "$@" == test-cluster ]] && threads='-- --test-threads=1'; \
+	 $(CARGO) test -p $$package $$threads
+	@$(MAKE) --no-print-directory postflight
 
-test-namespace:
-	cargo test -p legion-namespace
-
-test-deploy:
-	cargo test -p legion-deploy
-
-test-cluster:
-	cargo test -p legion-cluster -- --test-threads=1
-
-# Integration test: deploy a Bun function and invoke it directly via the REST API.
-# Requires: bun installed, LEGION_TEST_PORT available.
-integration-test: build
+integration-test: server
 	@echo "==> Legion integration test"
 	@./tests/integration/run.sh
 
@@ -60,22 +121,19 @@ cli-integration-test: server
 	@echo "==> Legion CLI integration test"
 	@./tests/integration/cli.sh
 
-wasm-integration-test: server
-	@echo "==> Legion WASM integration test"
-	@cd tests/fixtures/wasm-hello && cargo build --release --target wasm32-wasip1
-	@PORT=$${LEGION_TEST_PORT:-18090}; DATA=$$(mktemp -d); LOG=$$(mktemp); \
-	 LEGION_API_PORT=$$PORT LEGION_DATA_DIR=$$DATA RUST_LOG=error ./target/debug/legion serve >$$LOG 2>&1 & PID=$$!; \
-	 trap 'kill $$PID 2>/dev/null || true; rm -rf $$DATA $$LOG' EXIT; \
-	 for _ in $$(seq 1 50); do curl -sf http://127.0.0.1:$$PORT/health >/dev/null && break; sleep .2; done; \
-	 ./tests/integration/wasm_smoke.sh $$PORT
+wasm-fixture: preflight
+	$(CARGO) build --manifest-path tests/fixtures/wasm-hello/Cargo.toml --release --target wasm32-wasip1
 
-# Build the server binary only
-server:
-	cargo build -p legion-server
+wasm-integration-test: server wasm-fixture
+	@./tests/integration/wasm_server_smoke.sh
+	@$(MAKE) --no-print-directory postflight
+
+docs: preflight
+	$(CARGO) doc --workspace --no-deps --open
 
 # Stage with DESTDIR=/tmp/pkg; set ENABLE=1 for a live systemd installation.
 install:
-	BINARY=target/release/legion ./contrib/systemd/install.sh
+	BINARY=$(CARGO_TARGET_DIR)/release/legion ./contrib/systemd/install.sh
 
 uninstall:
 	./contrib/systemd/uninstall.sh

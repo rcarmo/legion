@@ -69,11 +69,15 @@ pub async fn start_membership(
 
     info!(%short, "gossip membership starting");
 
-    // Subscribe and connect to peers discovered during the Bonjour bootstrap probe.
-    let topic_sub = gossip
-        .subscribe_and_join(topic, bootstrap)
-        .await
-        .context("gossip subscribe")?;
+    // A solo node must not wait for a neighbor that does not exist. When
+    // bootstrap peers are known, wait until at least one connection is ready;
+    // otherwise subscribe immediately and let future peers connect inbound.
+    let topic_sub = if bootstrap.is_empty() {
+        gossip.subscribe(topic, bootstrap).await
+    } else {
+        gossip.subscribe_and_join(topic, bootstrap).await
+    }
+    .context("gossip subscribe")?;
 
     let (sender, mut receiver) = topic_sub.split();
 

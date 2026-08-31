@@ -9,12 +9,13 @@ set -euo pipefail
 
 PORT="${LEGION_TEST_PORT:-18080}"
 DATA_DIR="$(mktemp -d)"
-WS="$(cargo locate-project --workspace --message-format plain 2>/dev/null | xargs dirname)"
-BINARY="$WS/target/debug/legion"
+WS="$(cd "$(dirname "$0")/../.." && pwd)"
+TARGET_DIR="${CARGO_TARGET_DIR:-$WS/target}"
+BINARY="$TARGET_DIR/debug/legion"
 
-if [[ ! -f "$BINARY" ]]; then
-  echo "SKIP: legion binary not built at $BINARY (run 'make server' first)"
-  exit 0
+if [[ ! -x "$BINARY" ]]; then
+  echo "ERROR: legion binary not built at $BINARY (run 'make server' first)" >&2
+  exit 1
 fi
 
 # ── Start server ──────────────────────────────────────────────────────────────
@@ -32,14 +33,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for i in $(seq 1 30); do
-  sleep 0.3
+for i in $(seq 1 120); do
+  sleep 0.5
   if curl -sf "http://localhost:$PORT/health" >/dev/null 2>&1; then
     echo "    server up after ${i} attempts"
     break
   fi
-  if [[ $i -eq 30 ]]; then
-    echo "FAIL: server did not start"
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "FAIL: server exited before becoming ready"
+    wait "$SERVER_PID" || true
+    exit 1
+  fi
+  if [[ $i -eq 120 ]]; then
+    echo "FAIL: server did not start within 60 seconds"
     exit 1
   fi
 done

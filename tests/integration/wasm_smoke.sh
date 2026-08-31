@@ -6,12 +6,12 @@ set -euo pipefail
 
 PORT="${1:-${LEGION_TEST_PORT:-18080}}"
 WS="$(cd "$(dirname "$0")/../.." && pwd)"
-WASM="$WS/tests/fixtures/wasm-hello/target/wasm32-wasip1/release/wasm_hello.wasm"
+TARGET_DIR="${CARGO_TARGET_DIR:-$WS/target}"
+WASM="$TARGET_DIR/wasm32-wasip1/release/wasm_hello.wasm"
 
 if [[ ! -f "$WASM" ]]; then
-  echo "SKIP: wasm module not built — run:"
-  echo "  cd tests/fixtures/wasm-hello && cargo build --target wasm32-wasip1 --release"
-  exit 0
+  echo "ERROR: wasm module not built at $WASM — run 'make wasm-fixture'" >&2
+  exit 1
 fi
 
 if ! curl -sf "http://localhost:$PORT/health" >/dev/null 2>&1; then
