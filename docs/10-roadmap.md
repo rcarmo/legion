@@ -122,7 +122,7 @@ Checklist last reconciled with the implementation and test suite on 2026-08-31. 
 - [x] `legion session reconcile` — resolve `pending_reconciliation` sessions
 - [x] Rate limiting per session / per function
 - [x] `legion-server` systemd unit file
-- [ ] Comprehensive load tests (hiqlite bench: 24.5k inserts/s target)
+- [x] Comprehensive load tests (three-node hiqlite replicated batch gate ≥24.5k inserts/s; HTTP capacity, p95, error-rate, and overload-shedding gates)
 
 ---
 

@@ -9,7 +9,7 @@ TARGET_WARN_GB ?= 10
 
 .PHONY: help preflight postflight space build release test lint fmt fmt-check check verify-m3 \
 	clean clean-junk distclean docs dev server integration-test cli-integration-test \
-	wasm-fixture wasm-integration-test otel-integration-test backup-restore-drill install uninstall test-core test-store test-loop \
+	wasm-fixture wasm-integration-test otel-integration-test backup-restore-drill load-test load-test-http load-test-hiqlite server-release install uninstall test-core test-store test-loop \
 	test-namespace test-deploy test-cluster test-runtime-extism
 
 help:
@@ -98,6 +98,10 @@ server: preflight
 	$(CARGO) build -p legion-server
 	@$(MAKE) --no-print-directory postflight
 
+server-release: preflight
+	$(CARGO) build -p legion-server --release
+	@$(MAKE) --no-print-directory postflight
+
 # Run a single-node server in dev mode.
 dev: preflight
 	RUST_LOG=legion=debug,hiqlite=info $(CARGO) run -p legion-server
@@ -136,6 +140,16 @@ otel-integration-test: preflight
 backup-restore-drill: clean-junk
 	@command -v restic >/dev/null || { echo 'ERROR: restic is required' >&2; exit 1; }
 	@./tests/integration/restic_restore_drill.sh
+
+load-test: load-test-hiqlite load-test-http
+
+load-test-hiqlite: preflight
+	$(CARGO) test -p legion-store --features distributed --test hiqlite_load --release -- --ignored --nocapture --test-threads=1
+	@$(MAKE) --no-print-directory postflight
+
+load-test-http: server-release
+	@./tests/load/run_http.sh
+	@$(MAKE) --no-print-directory postflight
 
 docs: preflight
 	$(CARGO) doc --workspace --no-deps --open
