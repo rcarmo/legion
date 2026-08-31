@@ -15,6 +15,7 @@
 pub mod manifest;
 pub mod invoke;
 pub mod limits;
+pub mod routing;
 pub mod bun;
 #[cfg(feature = "extism")]
 pub mod wasm;
@@ -23,4 +24,5 @@ pub mod registry_bridge;
 pub use manifest::{FunctionManifest, FunctionRuntime};
 pub use invoke::{InvokeRequest, InvokeResult, Invoker};
 pub use limits::{BoundedInvoker, InvocationLimits, InvocationMetrics};
+pub use routing::FunctionRoute;
 pub use registry_bridge::RegistryBridge;

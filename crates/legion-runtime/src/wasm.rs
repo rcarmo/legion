@@ -36,8 +36,11 @@ impl WasmRuntime {
         Self { fn_root, cache: Mutex::new(HashMap::new()), timeout_ms }
     }
 
-    fn load_wasm(&self, function_name: &str) -> Result<Vec<u8>> {
-        let path = self.fn_root.join(function_name).join("index.wasm");
+    fn load_wasm(&self, function_name: &str, artifact_cid: Option<&str>) -> Result<Vec<u8>> {
+        let path = match artifact_cid {
+            Some(cid) => self.fn_root.join(".artifacts").join(cid).join("index.wasm"),
+            None => self.fn_root.join(function_name).join("index.wasm"),
+        };
         if !path.exists() {
             return Err(LegionError::ToolNotFound(format!(
                 "wasm function {} not found at {}",
@@ -54,18 +57,19 @@ impl WasmRuntime {
 impl Invoker for WasmRuntime {
     async fn invoke(&self, req: InvokeRequest) -> Result<InvokeResult> {
         let function_name = req.function_name.clone();
+        let cache_key = req.artifact_cid.clone().unwrap_or_else(|| function_name.clone());
         debug!(fn_name = %function_name, "invoking wasm function");
 
         // Load WASM bytes (check cache first)
         let wasm_bytes = {
             let cache = self.cache.lock().unwrap();
-            cache.get(&function_name).cloned()
+            cache.get(&cache_key).cloned()
         };
         let wasm_bytes = match wasm_bytes {
             Some(b) => b,
             None => {
-                let b = self.load_wasm(&function_name)?;
-                self.cache.lock().unwrap().insert(function_name.clone(), b.clone());
+                let b = self.load_wasm(&function_name, req.artifact_cid.as_deref())?;
+                self.cache.lock().unwrap().insert(cache_key, b.clone());
                 b
             }
         };

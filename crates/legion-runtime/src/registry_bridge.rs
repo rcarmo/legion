@@ -116,6 +116,7 @@ impl ToolRegistry for RegistryBridge {
             .invoke(InvokeRequest {
                 function_name: function_name.to_string(),
                 call_id: uuid::Uuid::new_v4().to_string(),
+                artifact_cid: None,
                 args,
             })
             .await?;

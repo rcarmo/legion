@@ -35,9 +35,10 @@ impl Default for BunRuntime {
 #[async_trait]
 impl Invoker for BunRuntime {
     async fn invoke(&self, req: InvokeRequest) -> Result<InvokeResult> {
-        let script = self.fn_root
-            .join(&req.function_name)
-            .join("index.ts");
+        let script = match &req.artifact_cid {
+            Some(cid) => self.fn_root.join(".artifacts").join(cid).join("index.ts"),
+            None => self.fn_root.join(&req.function_name).join("index.ts"),
+        };
 
         if !script.exists() {
             return Err(LegionError::ToolNotFound(format!(

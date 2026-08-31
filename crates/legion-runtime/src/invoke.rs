@@ -10,6 +10,8 @@ use legion_core::error::Result;
 pub struct InvokeRequest {
     pub function_name: String,
     pub call_id:       String,
+    /// Optional CAS artifact override selected by weighted routing.
+    pub artifact_cid:  Option<String>,
     pub args:          Value,
 }
 

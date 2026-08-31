@@ -281,6 +281,7 @@ mod tests {
         InvokeRequest {
             function_name: "test".into(),
             call_id: "call".into(),
+            artifact_cid: None,
             args,
         }
     }

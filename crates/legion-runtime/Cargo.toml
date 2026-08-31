@@ -18,5 +18,6 @@ anyhow      = { workspace = true }
 tracing     = { workspace = true }
 async-trait = { workspace = true }
 bytes       = { workspace = true }
+blake3      = { workspace = true }
 extism  = { version = "1", optional = true }
 uuid    = { workspace = true }

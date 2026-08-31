@@ -512,9 +512,26 @@ async fn invoke_function(
         FunctionRuntime::Bun
     };
 
+    let call_id = uuid::Uuid::new_v4().to_string();
+    let route = state.namespace.get(&format!("/deploy/routes/{name}")).await
+        .and_then(|node| match node.kind {
+            legion_namespace::NodeKind::Json(value) =>
+                serde_json::from_value::<legion_runtime::FunctionRoute>(value).ok(),
+            _ => None,
+        })
+        .filter(legion_runtime::FunctionRoute::validate);
+    let artifact_cid = match route {
+        Some(route) if route.selects_canary(&call_id) => {
+            state.deployer.materialize(&name, &runtime, &route.artifact_cid).await
+                .map_err(|error| server_error(error.to_string()).into_response())?;
+            Some(route.artifact_cid)
+        }
+        _ => None,
+    };
     let request = InvokeRequest {
         function_name: name.clone(),
-        call_id:       uuid::Uuid::new_v4().to_string(),
+        call_id,
+        artifact_cid,
         args,
     };
     let result = match runtime {

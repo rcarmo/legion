@@ -138,6 +138,23 @@ impl DeployPipeline {
         self.deploy(job).await
     }
 
+    /// Materialize an artifact from CAS for execution without changing the manifest.
+    pub async fn materialize(&self, name: &str, runtime: &FunctionRuntime, artifact_cid: &str) -> Result<PathBuf> {
+        if !is_valid_name(name) {
+            anyhow::bail!("name must match [a-z0-9-]+");
+        }
+        let artifact = self.blob_store.get(artifact_cid).await?;
+        let ext = match runtime {
+            FunctionRuntime::Wasm => "wasm",
+            FunctionRuntime::Bun => "ts",
+        };
+        let dir = self.fn_root.join(".artifacts").join(artifact_cid);
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join(format!("index.{ext}"));
+        std::fs::write(&path, artifact)?;
+        Ok(path)
+    }
+
     /// Remove a deployed function.
     pub async fn undeploy(&self, name: &str) -> Result<()> {
         self.namespace.delete(&format!("/fn/{name}")).await;
@@ -248,6 +265,20 @@ mod tests {
             std::fs::read_to_string(dir.path().join("fn/registered/index.ts")).unwrap(),
             "console.log('{}')",
         );
+    }
+
+    #[tokio::test]
+    async fn materializes_a_routed_artifact() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = pipeline(&dir).await;
+        let cid = p.deploy(DeployJob::new(
+            "original",
+            FunctionRuntime::Bun,
+            "",
+            "console.log('canary')",
+        )).await.artifact_cid.unwrap();
+        let path = p.materialize("hello", &FunctionRuntime::Bun, &cid).await.unwrap();
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "console.log('canary')");
     }
 
     #[tokio::test]
