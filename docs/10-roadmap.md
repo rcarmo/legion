@@ -84,13 +84,13 @@ Checklist last reconciled with the implementation and test suite on 2026-08-31. 
   - [x] iroh-blobs integration
   - [x] `push`, `register`, `route`, `promote` commands
   - [x] Canary weighted routing
-- [ ] `legion-runtime`: WASM executor
+- [x] `legion-runtime`: WASM executor
   - [x] wasmtime + extism integration
-  - [ ] Host functions (log, read, write, budget)
-  - [ ] Fuel-based CPU limit
-  - [ ] Memory limit enforcement
-  - [ ] Blob fetch + local cache (local cache exists; blob fetch does not)
-- [ ] `legion-runtime`: Bun executor
+  - [x] Host functions (log, read, write, budget)
+  - [x] Fuel-based CPU limit
+  - [x] Memory limit enforcement
+  - [x] Blob fetch + local cache
+- [x] `legion-runtime`: Bun executor
   - [x] Subprocess spawn + stdio protocol
   - [x] Timeout + process termination
   - [x] Environment variable injection

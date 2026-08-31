@@ -23,6 +23,10 @@ pub struct InvocationLimits {
     pub max_concurrent_per_function: usize,
     pub max_requests_per_window: u32,
     pub rate_window_ms: u64,
+    /// Maximum Wasmtime instructions per call; zero disables fuel metering.
+    pub wasm_fuel: u64,
+    /// Maximum linear memory available to a WASM guest.
+    pub wasm_max_memory_bytes: usize,
 }
 
 impl Default for InvocationLimits {
@@ -34,6 +38,8 @@ impl Default for InvocationLimits {
             max_concurrent_per_function: 8,
             max_requests_per_window: 120,
             rate_window_ms: 60_000,
+            wasm_fuel: 100_000_000,
+            wasm_max_memory_bytes: 64 * 1024 * 1024,
         }
     }
 }
@@ -147,7 +153,10 @@ impl BoundedInvoker {
         }
         let now = Instant::now();
         let duration = Duration::from_millis(self.limits.rate_window_ms);
-        let mut windows = self.rate_windows.lock().expect("invocation rate lock poisoned");
+        let mut windows = self
+            .rate_windows
+            .lock()
+            .expect("invocation rate lock poisoned");
         windows.retain(|_, window| now.duration_since(window.started) < duration);
         let window = windows.entry(function.into()).or_insert(RateWindow {
             started: now,
@@ -159,9 +168,12 @@ impl BoundedInvoker {
             window.count = 0;
         }
         if window.count >= self.limits.max_requests_per_window {
-            let retry_after_ms = duration.saturating_sub(now.duration_since(window.started))
-                .as_millis().max(1) as u64;
-            self.metrics.record(function, &self.runtime, "rate_limited", 0);
+            let retry_after_ms = duration
+                .saturating_sub(now.duration_since(window.started))
+                .as_millis()
+                .max(1) as u64;
+            self.metrics
+                .record(function, &self.runtime, "rate_limited", 0);
             return Err(LegionError::InvocationRateLimited {
                 function: function.into(),
                 retry_after_ms,
@@ -343,7 +355,10 @@ mod tests {
     async fn rate_limits_each_function_independently() {
         let metrics = Arc::new(InvocationMetrics::default());
         let invoker = BoundedInvoker::new(
-            Arc::new(FakeInvoker { delay_ms: 0, output: Value::Null }),
+            Arc::new(FakeInvoker {
+                delay_ms: 0,
+                output: Value::Null,
+            }),
             "test",
             InvocationLimits {
                 max_requests_per_window: 1,
@@ -356,7 +371,11 @@ mod tests {
 
         let error = invoker.invoke(request(Value::Null)).await.unwrap_err();
         assert!(matches!(error, LegionError::InvocationRateLimited { .. }));
-        assert!(metrics.render_prometheus().contains("outcome=\"rate_limited\""));
+        assert!(
+            metrics
+                .render_prometheus()
+                .contains("outcome=\"rate_limited\"")
+        );
 
         let mut other = request(Value::Null);
         other.function_name = "other".into();
@@ -366,9 +385,15 @@ mod tests {
     #[tokio::test]
     async fn rejects_concurrent_call_for_same_function() {
         let invoker = Arc::new(BoundedInvoker::new(
-            Arc::new(FakeInvoker { delay_ms: 50, output: Value::Null }),
+            Arc::new(FakeInvoker {
+                delay_ms: 50,
+                output: Value::Null,
+            }),
             "test",
-            InvocationLimits { max_concurrent_per_function: 1, ..Default::default() },
+            InvocationLimits {
+                max_concurrent_per_function: 1,
+                ..Default::default()
+            },
             Arc::new(InvocationMetrics::default()),
         ));
         let first = {

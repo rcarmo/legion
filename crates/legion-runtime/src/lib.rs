@@ -12,17 +12,17 @@
 //! - A `RegistryBridge` — exposes deployed functions as `legion_core::ToolDefinition`s
 //!   so the agent can call them via the standard tool dispatch path
 
-pub mod manifest;
+pub mod bun;
 pub mod invoke;
 pub mod limits;
+pub mod manifest;
+pub mod registry_bridge;
 pub mod routing;
-pub mod bun;
 #[cfg(feature = "extism")]
 pub mod wasm;
-pub mod registry_bridge;
 
-pub use manifest::{FunctionManifest, FunctionRuntime};
-pub use invoke::{InvokeRequest, InvokeResult, Invoker};
+pub use invoke::{ArtifactSource, InvokeRequest, InvokeResult, Invoker};
 pub use limits::{BoundedInvoker, InvocationLimits, InvocationMetrics};
-pub use routing::FunctionRoute;
+pub use manifest::{FunctionManifest, FunctionRuntime};
 pub use registry_bridge::RegistryBridge;
+pub use routing::FunctionRoute;

@@ -4,7 +4,10 @@ use std::path::Path;
 use std::str::FromStr;
 
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use iroh_blobs::{Hash, store::fs::FsStore};
+use legion_core::error::{LegionError, Result as LegionResult};
+use legion_runtime::ArtifactSource;
 use tokio::io::AsyncReadExt;
 
 /// Persistent iroh-blobs store used by the deploy pipeline.
@@ -56,6 +59,15 @@ impl DeployBlobStore {
             .await
             .context("shutdown deployment blob store")?;
         Ok(())
+    }
+}
+
+#[async_trait]
+impl ArtifactSource for DeployBlobStore {
+    async fn fetch(&self, cid: &str) -> LegionResult<Vec<u8>> {
+        self.get(cid)
+            .await
+            .map_err(|error| LegionError::ToolError(format!("fetch artifact {cid}: {error}")))
     }
 }
 

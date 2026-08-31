@@ -309,10 +309,15 @@ async fn run_server() -> Result<()> {
         invocation_metrics.clone(),
     ));
     #[cfg(feature = "wasm")]
-    let wasm_backend = Arc::new(WasmRuntime::with_timeout(
-        cfg.cluster.data_dir.join("fn"),
-        cfg.invocation.timeout_ms,
-    ));
+    let wasm_backend = Arc::new(
+        WasmRuntime::with_limits(
+            cfg.cluster.data_dir.join("fn"),
+            cfg.invocation.timeout_ms,
+            cfg.invocation.wasm_fuel,
+            cfg.invocation.wasm_max_memory_bytes,
+        )
+        .with_artifact_source(Arc::new(deployer.artifact_store())),
+    );
     #[cfg(feature = "wasm")]
     let wasm_runtime: Arc<dyn legion_runtime::invoke::Invoker> = Arc::new(BoundedInvoker::new(
         wasm_backend,

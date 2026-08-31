@@ -19,6 +19,7 @@ tracing     = { workspace = true }
 bytes       = { workspace = true }
 uuid        = { workspace = true }
 chrono      = { workspace = true }
+async-trait = { workspace = true }
 iroh-blobs  = { workspace = true }
 [dev-dependencies]
 tempfile = "3"

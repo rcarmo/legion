@@ -11,21 +11,27 @@ use legion_core::error::Result;
 #[derive(Debug, Clone)]
 pub struct InvokeRequest {
     pub function_name: String,
-    pub call_id:       String,
+    pub call_id: String,
     /// Optional CAS artifact override selected by weighted routing.
-    pub artifact_cid:  Option<String>,
+    pub artifact_cid: Option<String>,
     /// Explicit environment variables supplied by the deployment manifest.
-    pub env:           BTreeMap<String, String>,
-    pub args:          Value,
+    pub env: BTreeMap<String, String>,
+    pub args: Value,
 }
 
 /// The result of a function invocation.
 #[derive(Debug, Clone)]
 pub struct InvokeResult {
-    pub call_id:  String,
-    pub output:   Value,
-    pub wall_ms:  u64,
-    pub error:    Option<String>,
+    pub call_id: String,
+    pub output: Value,
+    pub wall_ms: u64,
+    pub error: Option<String>,
+}
+
+/// Source used by runtimes to fetch missing content-addressed artifacts.
+#[async_trait]
+pub trait ArtifactSource: Send + Sync {
+    async fn fetch(&self, cid: &str) -> Result<Vec<u8>>;
 }
 
 /// Trait implemented by each runtime backend.

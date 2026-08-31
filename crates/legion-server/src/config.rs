@@ -127,6 +127,8 @@ mod tests {
         assert_eq!(config.raft_api_addr, "0.0.0.0:17002");
         assert_eq!(config.invocation.timeout_ms, 30_000);
         assert_eq!(config.invocation.max_requests_per_window, 120);
+        assert_eq!(config.invocation.wasm_fuel, 100_000_000);
+        assert_eq!(config.invocation.wasm_max_memory_bytes, 64 * 1024 * 1024);
         assert_eq!(config.session_rate_limit.max_requests_per_window, 30);
     }
 }
