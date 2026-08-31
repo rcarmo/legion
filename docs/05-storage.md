@@ -34,7 +34,7 @@ hiqlite wraps `rusqlite` with `openraft` to provide a strongly-consistent, highl
 |---|---|
 | `sqlite` | Core turn and session storage |
 | `auto-heal` | Automatic log catch-up after node rejoin |
-| `backup` | Encrypted off-cluster snapshot transport for the SQLite state machine; hiqlite currently targets S3-compatible object storage |
+| `backup` | Native encrypted off-cluster snapshots of the SQLite state machine to S3-compatible object storage; one supported backend alongside restic |
 | `dlock` | Distributed lock for leader-only operations (e.g. function promotion) |
 | `listen_notify_local` | Wake parked sessions on turn completion |
 | `migrations` | Schema evolution via numbered SQL files |
@@ -140,9 +140,18 @@ This means: push a function blob to any one node → all nodes can serve it to a
 | hiqlite peers | Empty (single-node mode) | 3 addresses from mDNS |
 | fjall | Local directory | Local directory (each node) |
 | iroh-blobs | Local store | Distributed across all peers |
-| Off-cluster backup | Disabled | Required, encrypted and restore-tested; hiqlite's S3-compatible transport is the initial implementation |
+| Off-cluster backup | Disabled | Required, encrypted and restore-tested; use hiqlite's native S3-compatible snapshots or a restic repository |
 
-The application code is identical — only configuration changes. “S3-compatible” describes the initial transport, not the durability requirement: production readiness requires recoverable copies outside the Legion cluster and a regularly verified clean-node restore procedure.
+The application code is identical — only configuration changes. Production readiness requires recoverable copies outside the Legion cluster and a regularly verified clean-node restore procedure, not a specific storage vendor.
+
+### Backup backends
+
+Legion's backup workflow is backend-neutral and supports two implementation paths:
+
+- **hiqlite-native snapshots** to S3-compatible object storage, preserving database consistency through hiqlite's own backup machinery.
+- **restic repositories**, including local/removable storage, SFTP, REST server, and object-storage backends. Before restic runs, Legion must produce or quiesce to a database-consistent snapshot. Restic must not capture live SQLite, WAL, fjall, or Raft files as an uncoordinated directory copy.
+
+Both paths must use encryption, retention policies, automated integrity checks, and the same clean-node restore drill. Replicated iroh blobs required by durable state must be included in the backup set or be independently recoverable.
 
 ---
 

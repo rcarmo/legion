@@ -108,11 +108,17 @@ Checklist last reconciled with the implementation and test suite on 2026-08-31. 
 - [x] Authenticated encryption for iroh connections (built into iroh QUIC endpoints)
 - [ ] Authentication for namespace access (capability tokens; REST API-key authentication exists)
 - [ ] Off-cluster, restorable backups
-  - [ ] Automated encrypted state snapshots to storage outside the Legion cluster (initially via hiqlite's S3-compatible backup transport)
+  - [ ] Backend-neutral snapshot workflow with at least one production backend implemented
+  - [ ] Support hiqlite's native S3-compatible snapshot transport and/or restic repositories (local, SFTP, REST, or object-storage backed)
+  - [ ] Quiesce or use a database-consistent snapshot before restic capture; never copy live SQLite/Raft files blindly
   - [ ] Documented and automated restore procedure
   - [ ] Successful restore drill from a clean node, with state integrity verified
 - [ ] OpenTelemetry traces for agent loop steps
-- [x] Metrics: turn latency, token counts, function invocation times
+- [ ] OpenTelemetry metrics export for token consumption
+  - [ ] Monotonic input, output, cache-read, and cache-write token counters where providers expose them
+  - [ ] Low-cardinality dimensions for provider, model, node, and outcome; never session IDs, run IDs, prompts, or user content
+  - [ ] OTLP configuration plus an integration test proving token usage reaches an OTEL collector
+- [x] Built-in metrics endpoint: turn latency, token counts, function invocation times
 - [x] `legion session reconcile` — resolve `pending_reconciliation` sessions
 - [x] Rate limiting per session / per function
 - [x] `legion-server` systemd unit file
@@ -155,5 +161,5 @@ Checklist last reconciled with the implementation and test suite on 2026-08-31. 
 | jetstream "not production-ready" | Pin version; contribute upstream or fork if needed |
 | openraft alpha version label | Deployed in production at Databend; label is cosmetic |
 | Bun subprocess overhead | ~50-200ms cold start; mitigate with warm pool (future milestone) |
-| fjall/hiqlite storage format stability | Pin versions, test upgrades, and maintain restore-tested off-cluster backups (initially through hiqlite's S3-compatible transport) |
+| fjall/hiqlite storage format stability | Pin versions, test upgrades, and maintain restore-tested off-cluster backups through hiqlite snapshots or database-consistent restic captures |
 | rs-ai tracking upstream pi-ai | We own both; coordinate breaking changes explicitly |

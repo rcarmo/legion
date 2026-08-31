@@ -232,6 +232,8 @@ rate_window_ms = 60000
 
 The equivalent environment overrides are `LEGION_INVOKE_TIMEOUT_MS`, `LEGION_INVOKE_MAX_INPUT_BYTES`, `LEGION_INVOKE_MAX_OUTPUT_BYTES`, `LEGION_INVOKE_MAX_CONCURRENT_PER_FUNCTION`, `LEGION_INVOKE_MAX_REQUESTS_PER_WINDOW`, and `LEGION_INVOKE_RATE_WINDOW_MS`. Limit errors return HTTP 413 (payload), 429 (rate/concurrency), or 504 (deadline). `/metrics` reports per-function invocation counts and wall time plus replay-derived agent turn and token totals.
 
+Milestone 4 also exports token consumption over OTLP for central observability. Input, output, cache-read, and cache-write usage are monotonic counters where the provider supplies those values. Attributes are restricted to bounded operational dimensions such as provider, configured model, node, and outcome; session IDs, run IDs, prompts, and user content are forbidden to avoid high-cardinality series and data leakage. The existing `/metrics` endpoint remains available independently of OTLP export.
+
 Session execution requests (`messages`, `stream`, and external `events`) are limited per session through `[session_rate_limit]`, with `LEGION_SESSION_MAX_REQUESTS_PER_WINDOW` and `LEGION_SESSION_RATE_WINDOW_MS` overrides. Read and reconciliation routes remain available. HTTP 429 responses include `Retry-After`; function and session rejections are exported by `/metrics`.
 
 Session budgets accept `max_turns`, `max_tool_calls`, `max_tokens_in`, `max_tokens_out`, and `max_wall_ms`. Budget halts are stored as `SessionBudgetHalt` events and set the durable session status to `budget_halt`.
