@@ -107,12 +107,12 @@ Checklist last reconciled with the implementation and test suite on 2026-08-31. 
 
 - [x] Authenticated encryption for iroh connections (built into iroh QUIC endpoints)
 - [x] Authentication for namespace access (9P attach bearer capability, independent from REST API-key authentication)
-- [ ] Off-cluster, restorable backups
-  - [ ] Backend-neutral snapshot workflow with at least one production backend implemented
-  - [ ] Support hiqlite's native S3-compatible snapshot transport and/or restic repositories (local, SFTP, REST, or object-storage backed)
-  - [ ] Quiesce or use a database-consistent snapshot before restic capture; never copy live SQLite/Raft files blindly
-  - [ ] Documented and automated restore procedure
-  - [ ] Successful restore drill from a clean node, with state integrity verified
+- [x] Off-cluster, restorable backups
+  - [x] Backend-neutral snapshot workflow with at least one production backend implemented
+  - [x] Restic repositories supported (local, SFTP, REST, or object-storage backed); hiqlite's native S3-compatible transport remains an optional future backend
+  - [x] Quiesce or use a database-consistent snapshot before restic capture; never copy live SQLite/Raft files blindly
+  - [x] Documented and automated restore procedure
+  - [x] Successful restore drill from a clean node, with state integrity verified
 - [x] OpenTelemetry traces for agent loop steps
 - [x] OpenTelemetry metrics export for token consumption
   - [x] Monotonic input, output, cache-read, and cache-write token counters where providers expose them

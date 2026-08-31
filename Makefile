@@ -9,7 +9,7 @@ TARGET_WARN_GB ?= 10
 
 .PHONY: help preflight postflight space build release test lint fmt fmt-check check verify-m3 \
 	clean clean-junk distclean docs dev server integration-test cli-integration-test \
-	wasm-fixture wasm-integration-test otel-integration-test install uninstall test-core test-store test-loop \
+	wasm-fixture wasm-integration-test otel-integration-test backup-restore-drill install uninstall test-core test-store test-loop \
 	test-namespace test-deploy test-cluster test-runtime-extism
 
 help:
@@ -132,6 +132,10 @@ otel-integration-test: preflight
 	$(CARGO) build -p legion-server --bin otel-probe
 	@./tests/integration/otel_collector_smoke.sh
 	@$(MAKE) --no-print-directory postflight
+
+backup-restore-drill: clean-junk
+	@command -v restic >/dev/null || { echo 'ERROR: restic is required' >&2; exit 1; }
+	@./tests/integration/restic_restore_drill.sh
 
 docs: preflight
 	$(CARGO) doc --workspace --no-deps --open
