@@ -92,6 +92,12 @@ pub struct NewSessionArgs {
 pub enum DeployCommand {
     /// Deploy source or a WASM module in one operation.
     Push(DeployArgs),
+    /// Register an existing CAS artifact as a function.
+    Register(RegisterArgs),
+    /// Set an artifact's routing weight in basis points.
+    Route(RouteArgs),
+    /// Promote an artifact to receive all traffic.
+    Promote(PromoteArgs),
     /// List deployed functions.
     List,
     /// Remove a deployed function.
@@ -123,6 +129,35 @@ pub struct DeployArgs {
     pub schema: Option<PathBuf>,
     #[arg(long)]
     pub idempotent: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct RegisterArgs {
+    pub name: String,
+    pub artifact_cid: String,
+    #[arg(long, value_enum)]
+    pub runtime: RuntimeArg,
+    #[arg(long)]
+    pub description: Option<String>,
+    #[arg(long)]
+    pub schema: Option<PathBuf>,
+    #[arg(long)]
+    pub idempotent: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct RouteArgs {
+    pub name: String,
+    pub artifact_cid: String,
+    /// Traffic weight in basis points (0-10000).
+    #[arg(long, default_value_t = 10_000, value_parser = clap::value_parser!(u16).range(0..=10_000))]
+    pub weight: u16,
+}
+
+#[derive(Debug, Args)]
+pub struct PromoteArgs {
+    pub name: String,
+    pub artifact_cid: String,
 }
 
 #[derive(Debug, Args)]
@@ -215,13 +250,36 @@ async fn run_deploy(client: &ApiClient, command: &DeployCommand) -> Result<()> {
         DeployCommand::Delete { name } => {
             print_json(client.json(Method::DELETE, &format!("/functions/{name}"), None).await?);
         }
-        DeployCommand::Push(args) => {
-            let parameters = match &args.schema {
-                Some(path) => serde_json::from_slice(&std::fs::read(path)
-                    .with_context(|| format!("read schema {}", path.display()))?)
-                    .with_context(|| format!("parse schema {}", path.display()))?,
-                None => json!({ "type": "object", "properties": {} }),
+        DeployCommand::Register(args) => {
+            let parameters = read_schema(args.schema.as_ref())?;
+            let runtime = match args.runtime {
+                RuntimeArg::Bun => "bun",
+                RuntimeArg::Wasm => "wasm",
             };
+            print_json(client.json(Method::POST, "/deploy/register", Some(json!({
+                "name": args.name,
+                "artifact_cid": args.artifact_cid,
+                "runtime": runtime,
+                "description": args.description,
+                "parameters": parameters,
+                "idempotent": args.idempotent,
+            }))).await?);
+        }
+        DeployCommand::Route(args) => {
+            print_json(client.json(Method::POST, "/deploy/route", Some(json!({
+                "name": args.name,
+                "artifact_cid": args.artifact_cid,
+                "weight": args.weight,
+            }))).await?);
+        }
+        DeployCommand::Promote(args) => {
+            print_json(client.json(Method::POST, "/deploy/promote", Some(json!({
+                "name": args.name,
+                "artifact_cid": args.artifact_cid,
+            }))).await?);
+        }
+        DeployCommand::Push(args) => {
+            let parameters = read_schema(args.schema.as_ref())?;
             let artifact = std::fs::read(&args.path)
                 .with_context(|| format!("read artifact {}", args.path.display()))?;
             let runtime = match args.runtime {
@@ -250,6 +308,15 @@ async fn run_deploy(client: &ApiClient, command: &DeployCommand) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn read_schema(path: Option<&PathBuf>) -> Result<Value> {
+    match path {
+        Some(path) => serde_json::from_slice(&std::fs::read(path)
+            .with_context(|| format!("read schema {}", path.display()))?)
+            .with_context(|| format!("parse schema {}", path.display())),
+        None => Ok(json!({ "type": "object", "properties": {} })),
+    }
 }
 
 fn read_json_input(argument: Option<&str>) -> Result<Value> {
@@ -371,5 +438,30 @@ mod tests {
     #[test]
     fn rejects_non_http_url() {
         assert!(ApiClient::new("file:///tmp/socket", None).is_err());
+    }
+
+    #[test]
+    fn parses_deployment_control_commands() {
+        assert!(matches!(
+            Cli::try_parse_from(["legion", "deploy", "register", "hello", "cid", "--runtime", "bun"])
+                .unwrap()
+                .command,
+            Some(Command::Deploy { command: DeployCommand::Register(_) })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["legion", "deploy", "route", "hello", "cid", "--weight", "2500"])
+                .unwrap()
+                .command,
+            Some(Command::Deploy { command: DeployCommand::Route(RouteArgs { weight: 2500, .. }) })
+        ));
+        assert!(Cli::try_parse_from([
+            "legion", "deploy", "route", "hello", "cid", "--weight", "10001"
+        ]).is_err());
+        assert!(matches!(
+            Cli::try_parse_from(["legion", "deploy", "promote", "hello", "cid"])
+                .unwrap()
+                .command,
+            Some(Command::Deploy { command: DeployCommand::Promote(_) })
+        ));
     }
 }

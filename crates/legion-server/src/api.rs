@@ -84,6 +84,32 @@ struct DeployRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct RegisterRequest {
+    name:        String,
+    artifact_cid: String,
+    runtime:     Option<String>,
+    description: Option<String>,
+    idempotent:  Option<bool>,
+    parameters:  Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RouteRequest {
+    name: String,
+    artifact_cid: String,
+    #[serde(default = "full_weight")]
+    weight: u16,
+}
+
+#[derive(Debug, Deserialize)]
+struct PromoteRequest {
+    name: String,
+    artifact_cid: String,
+}
+
+fn full_weight() -> u16 { 10_000 }
+
+#[derive(Debug, Deserialize)]
 struct SendMessageRequest {
     content: String,
 }
@@ -319,6 +345,73 @@ async fn deploy_function(
     }
 }
 
+async fn register_function(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<RegisterRequest>,
+) -> Result<(StatusCode, Json<Value>), (StatusCode, Json<Value>)> {
+    let runtime = match req.runtime.as_deref().unwrap_or("bun") {
+        "wasm" => FunctionRuntime::Wasm,
+        "bun" => FunctionRuntime::Bun,
+        other => return Err((StatusCode::BAD_REQUEST, Json(json!({
+            "error": format!("unsupported runtime: {other}")
+        })))),
+    };
+    let mut job = DeployJob::new(
+        req.name,
+        runtime,
+        req.description.unwrap_or_default(),
+        "",
+    );
+    if let Some(parameters) = req.parameters { job.parameters = parameters; }
+    if let Some(idempotent) = req.idempotent { job.idempotent = idempotent; }
+    let outcome = state.deployer.register(job, &req.artifact_cid).await;
+    if outcome.status == legion_deploy::DeployStatus::Success {
+        Ok((StatusCode::CREATED, Json(serde_json::to_value(&outcome).unwrap())))
+    } else {
+        Err((StatusCode::UNPROCESSABLE_ENTITY, Json(serde_json::to_value(&outcome).unwrap())))
+    }
+}
+
+async fn route_function(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<RouteRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if req.weight > 10_000 {
+        return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": "weight must be 0..=10000" }))));
+    }
+    let value = json!({
+        "name": req.name,
+        "artifact_cid": req.artifact_cid,
+        "weight": req.weight,
+        "updated_at": chrono::Utc::now().timestamp_millis(),
+    });
+    state.namespace.set_json(&format!("/deploy/routes/{}", req.name), value.clone()).await;
+    Ok(Json(value))
+}
+
+async fn promote_function(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<PromoteRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let path = format!("/fn/{}/manifest.json", req.name);
+    let Some(node) = state.namespace.get(&path).await else {
+        return Err(not_found(format!("function not found: {}", req.name)));
+    };
+    let legion_namespace::NodeKind::Json(mut manifest) = node.kind else {
+        return Err(server_error("function manifest is not JSON".into()));
+    };
+    manifest["artifact_cid"] = Value::String(req.artifact_cid.clone());
+    state.namespace.set_json(&path, manifest).await;
+    let value = json!({
+        "name": req.name,
+        "artifact_cid": req.artifact_cid,
+        "weight": 10_000,
+        "promoted_at": chrono::Utc::now().timestamp_millis(),
+    });
+    state.namespace.set_json(&format!("/deploy/routes/{}", req.name), value.clone()).await;
+    Ok(Json(value))
+}
+
 fn base64_decode(input: &str) -> anyhow::Result<Vec<u8>> {
     use base64::Engine;
 
@@ -548,6 +641,9 @@ pub async fn serve(state: Arc<AppState>, addr: String, api_key: Option<String>) 
         .route("/sessions/{id}/events",            post(session_webhook))
         .route("/sessions/{id}/reconcile",         post(reconcile_session))
         .route("/functions",                       get(list_functions).post(deploy_function))
+        .route("/deploy/register",                  post(register_function))
+        .route("/deploy/route",                     post(route_function))
+        .route("/deploy/promote",                   post(promote_function))
         .route("/functions/{name}",                axum::routing::delete(delete_function))
         .route("/functions/{name}/invoke",         post(invoke_function))
         .with_state(state)

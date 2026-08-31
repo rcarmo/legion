@@ -120,6 +120,24 @@ impl DeployPipeline {
         }
     }
 
+    /// Register an existing CAS artifact as a deployed function.
+    pub async fn register(&self, mut job: DeployJob, artifact_cid: &str) -> DeployOutcome {
+        let artifact = match self.blob_store.get(artifact_cid).await {
+            Ok(artifact) => artifact,
+            Err(error) => return failed(job, Instant::now(), format!("load artifact: {error}")),
+        };
+        match job.runtime {
+            FunctionRuntime::Wasm => job.wasm_bytes = Some(artifact),
+            FunctionRuntime::Bun => match String::from_utf8(artifact) {
+                Ok(code) => job.code = code,
+                Err(error) => {
+                    return failed(job, Instant::now(), format!("Bun artifact is not UTF-8: {error}"));
+                }
+            },
+        }
+        self.deploy(job).await
+    }
+
     /// Remove a deployed function.
     pub async fn undeploy(&self, name: &str) -> Result<()> {
         self.namespace.delete(&format!("/fn/{name}")).await;
@@ -212,6 +230,23 @@ mod tests {
                 .await
                 .is_some(),
             "artifact metadata must be registered in namespace",
+        );
+    }
+
+    #[tokio::test]
+    async fn register_materializes_existing_artifact() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = pipeline(&dir).await;
+        let original = DeployJob::new("original", FunctionRuntime::Bun, "", "console.log('{}')");
+        let cid = p.deploy(original).await.artifact_cid.unwrap();
+        let registered = p.register(
+            DeployJob::new("registered", FunctionRuntime::Bun, "", ""),
+            &cid,
+        ).await;
+        assert_eq!(registered.artifact_cid.as_deref(), Some(cid.as_str()));
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("fn/registered/index.ts")).unwrap(),
+            "console.log('{}')",
         );
     }
 

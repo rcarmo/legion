@@ -82,7 +82,7 @@ Checklist last reconciled with the implementation and test suite on 2026-08-31. 
 
 - [x] `legion-deploy`: CAS deployment (artifacts are stored by BLAKE3 CID and materialized locally for execution)
   - [x] iroh-blobs integration
-  - [ ] `push`, `register`, `route`, `promote` commands (`push` is implemented)
+  - [x] `push`, `register`, `route`, `promote` commands
   - [ ] Canary weighted routing
 - [ ] `legion-runtime`: WASM executor
   - [x] wasmtime + extism integration
