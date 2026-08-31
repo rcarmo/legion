@@ -26,6 +26,7 @@ pub struct LegionNamespace {
     functions: Option<Arc<dyn crate::resources::FunctionNamespace>>,
     deploy: Option<Arc<dyn crate::resources::DeployNamespace>>,
     cluster: Option<Arc<dyn crate::resources::ClusterNamespace>>,
+    capability_hash: Option<[u8; 32]>,
 }
 
 impl LegionNamespace {
@@ -39,6 +40,37 @@ impl LegionNamespace {
             functions: None,
             deploy: None,
             cluster: None,
+            capability_hash: None,
+        }
+    }
+
+    /// Require callers to present `cap=<token>` as the 9P attach name.
+    pub fn with_capability_token(mut self, token: impl AsRef<[u8]>) -> Self {
+        self.capability_hash = Some(*blake3::hash(token.as_ref()).as_bytes());
+        self
+    }
+
+    fn authorize_attach(&self, aname: &str) -> io::Result<()> {
+        let Some(expected) = self.capability_hash else {
+            return Ok(());
+        };
+        let supplied = aname.strip_prefix("cap=").ok_or_else(|| {
+            io::Error::new(io::ErrorKind::PermissionDenied, "capability required")
+        })?;
+        let actual = blake3::hash(supplied.as_bytes());
+        let mismatch = expected
+            .iter()
+            .zip(actual.as_bytes())
+            .fold(0_u8, |difference, (left, right)| {
+                difference | (left ^ right)
+            });
+        if mismatch == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "invalid capability",
+            ))
         }
     }
 
@@ -423,8 +455,8 @@ impl NineP200L for LegionNamespace {
 
     async fn auth(&mut self, _tag: u16, _message: &Tauth) -> io::Result<Rauth> {
         Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "authentication not required",
+            io::ErrorKind::Unsupported,
+            "authenticate with a capability in Tattach.aname",
         ))
     }
 
@@ -523,6 +555,7 @@ impl NineP200L for LegionNamespace {
     }
 
     async fn attach(&mut self, _tag: u16, message: &Tattach) -> io::Result<Rattach> {
+        self.authorize_attach(&message.aname)?;
         self.fids.write().await.insert(message.fid, "/".into());
         Ok(Rattach {
             qid: self.qid("/").await,
@@ -755,6 +788,27 @@ mod tests {
             ns.get("/cluster/health").await.unwrap().kind.as_json(),
             Some(&json!({"ok": false}))
         );
+    }
+
+    #[tokio::test]
+    async fn attach_requires_matching_capability_when_configured() {
+        let mut fs = LegionNamespace::new(Namespace::new()).with_capability_token("secret");
+        let attach = |aname: &str| Tattach {
+            fid: 1,
+            afid: u32::MAX,
+            uname: "test".into(),
+            aname: aname.into(),
+            n_uname: 0,
+        };
+        assert_eq!(
+            fs.attach(1, &attach("")).await.unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied,
+        );
+        assert_eq!(
+            fs.attach(2, &attach("cap=wrong")).await.unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied,
+        );
+        fs.attach(3, &attach("cap=secret")).await.unwrap();
     }
 
     #[tokio::test]

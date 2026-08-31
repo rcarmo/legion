@@ -45,6 +45,7 @@ pub fn serve_namespace_and_gossip(
 /// Minimal 9P client used for transparent peer path forwarding and integration tests.
 pub struct NinePClient {
     mux: Mux<LegionNineP>,
+    capability: Option<String>,
 }
 
 impl NinePClient {
@@ -70,7 +71,10 @@ impl NinePClient {
             ClientCodec::<LegionNineP>::default(),
         );
         let mux = Mux::new(256, Box::new(transport));
-        let client = Self { mux };
+        let client = Self {
+            mux,
+            capability: None,
+        };
         match client
             .rpc(jetstream_9p::server::Tmessage::Version(
                 jetstream_9p::Tversion {
@@ -83,6 +87,11 @@ impl NinePClient {
             jetstream_9p::server::Rmessage::Version(_) => Ok(client),
             response => anyhow::bail!("unexpected 9P version response: {response:?}"),
         }
+    }
+
+    pub fn with_capability(mut self, capability: impl Into<String>) -> Self {
+        self.capability = Some(capability.into());
+        self
     }
 
     async fn rpc(
@@ -137,7 +146,11 @@ impl NinePClient {
                     fid,
                     afid: u32::MAX,
                     uname: "legion".into(),
-                    aname: "".into(),
+                    aname: self
+                        .capability
+                        .as_ref()
+                        .map(|token| format!("cap={token}"))
+                        .unwrap_or_default(),
                     n_uname: u32::MAX,
                 },
             ))

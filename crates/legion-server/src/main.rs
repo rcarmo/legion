@@ -121,6 +121,9 @@ async fn run_server() -> Result<()> {
         &mut cfg.session_rate_limit.window_ms,
         "LEGION_SESSION_RATE_WINDOW_MS",
     );
+    let namespace_capability = std::env::var("LEGION_NAMESPACE_CAPABILITY")
+        .ok()
+        .or_else(|| cfg.namespace_capability.clone());
     info!(
         data_dir = %cfg.cluster.data_dir.display(),
         api_port = cfg.cluster.api_port,
@@ -363,12 +366,26 @@ async fn run_server() -> Result<()> {
         .with_functions(bridge.clone())
         .with_deploy(deploy_resources)
         .with_cluster(cluster_resources);
+    let ninep_namespace = match namespace_capability.as_ref() {
+        Some(token) => {
+            info!("namespace capability authentication enabled");
+            ninep_namespace.with_capability_token(token)
+        }
+        None => {
+            warn!("no namespace capability set — 9P namespace is open to authenticated iroh peers");
+            ninep_namespace
+        }
+    };
     if let BootstrapOutcome::Join { peers, .. } = &outcome {
         for peer in peers {
             match peer.endpoint_id.parse() {
                 Ok(endpoint_id) => {
                     match NinePClient::connect_endpoint(&node.endpoint, endpoint_id).await {
                         Ok(client) => {
+                            let client = match namespace_capability.as_ref() {
+                                Some(token) => client.with_capability(token.clone()),
+                                None => client,
+                            };
                             ninep_namespace
                                 .register_peer(peer.endpoint_id.clone(), Arc::new(client))
                                 .await;

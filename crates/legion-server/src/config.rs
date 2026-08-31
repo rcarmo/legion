@@ -28,6 +28,10 @@ pub struct ServerConfig {
     /// Also read from LEGION_API_KEY env var (env takes precedence).
     #[serde(default)]
     pub api_key: Option<String>,
+    /// Optional bearer capability required in the 9P `Tattach.aname` field.
+    /// Also read from LEGION_NAMESPACE_CAPABILITY (env takes precedence).
+    #[serde(default)]
+    pub namespace_capability: Option<String>,
     /// Hiqlite Raft peers for multi-node mode. When empty, uses single-node SQLite store.
     /// When populated, switches to HiqliteStore on the distributed feature.
     #[serde(default)]

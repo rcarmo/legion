@@ -106,7 +106,7 @@ Checklist last reconciled with the implementation and test suite on 2026-08-31. 
 **Goal**: Production-ready cluster with observability, backup, and security.
 
 - [x] Authenticated encryption for iroh connections (built into iroh QUIC endpoints)
-- [ ] Authentication for namespace access (capability tokens; REST API-key authentication exists)
+- [x] Authentication for namespace access (9P attach bearer capability, independent from REST API-key authentication)
 - [ ] Off-cluster, restorable backups
   - [ ] Backend-neutral snapshot workflow with at least one production backend implemented
   - [ ] Support hiqlite's native S3-compatible snapshot transport and/or restic repositories (local, SFTP, REST, or object-storage backed)

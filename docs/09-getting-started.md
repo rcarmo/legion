@@ -198,6 +198,10 @@ POST   /functions/{name}/invoke
 GET    /metrics                        # Prometheus text metrics
 ```
 
+## Namespace authentication
+
+Set `LEGION_NAMESPACE_CAPABILITY` (or `namespace_capability` in `legion.toml`) to require a bearer capability on every 9P attach. Clients send it in `Tattach.aname` as `cap=<token>`; Legion's peer proxy forwards the configured capability automatically. Keep this token independent from `LEGION_API_KEY`, and prefer the environment or service credential storage over a checked-in config file. When unset, the namespace remains available to authenticated iroh peers for development compatibility.
+
 ## Useful Commands
 
 ```bash

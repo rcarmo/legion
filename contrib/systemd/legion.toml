@@ -1,6 +1,8 @@
 # Legion daemon configuration for the packaged systemd service.
 # Prefer LEGION_API_KEY in legion.env rather than putting secrets here.
 # api_key = "replace-with-a-long-random-token"
+# Prefer LEGION_NAMESPACE_CAPABILITY in legion.env for 9P attach authentication.
+# namespace_capability = "replace-with-an-independent-long-random-token"
 # Distributed builds use hiqlite for both solo and multi-node operation.
 # Configure a unique raft_node_id and routable raft_addr/raft_api_addr on each
 # node. Peers can be listed explicitly with [[raft_peers]] or discovered from
