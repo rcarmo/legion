@@ -13,6 +13,7 @@ serde       = { workspace = true }
 serde_json  = { workspace = true }
 thiserror   = { workspace = true }
 anyhow      = { workspace = true }
+async-trait = { workspace = true }
 tracing     = { workspace = true }
 chrono      = { workspace = true }
 futures     = { workspace = true }
@@ -23,6 +24,12 @@ iroh-mdns-address-lookup = { workspace = true }
 bytes       = { workspace = true }
 blake3      = { workspace = true }
 mdns-sd                  = { workspace = true }
+legion-namespace = { path = "../legion-namespace" }
+jetstream_9p  = { workspace = true }
+jetstream_rpc = { workspace = true }
+jetstream_wireformat = "16"
+tokio-util    = { version = "0.7", features = ["codec"] }
 
 [dev-dependencies]
 tempfile = "3"
+uuid = { workspace = true }

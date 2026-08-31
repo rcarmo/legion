@@ -13,7 +13,7 @@ use crate::node::ClusterNode;
 #[derive(Debug, Clone)]
 pub struct PeerInfo {
     pub endpoint_id: EndpointId,
-    pub addresses:   Vec<std::net::SocketAddr>,
+    pub addresses: Vec<std::net::SocketAddr>,
 }
 
 #[derive(Debug, Clone)]
@@ -25,13 +25,14 @@ pub enum DiscoveryEvent {
 /// A running mDNS discovery session.
 pub struct MdnsDiscovery {
     tx: broadcast::Sender<DiscoveryEvent>,
+    _lookup: MdnsAddressLookup,
 }
 
 impl MdnsDiscovery {
     /// Attach mDNS address lookup to an existing endpoint and start the discovery loop.
     pub async fn start(node: &ClusterNode) -> Result<Self> {
         let (tx, _rx) = broadcast::channel::<DiscoveryEvent>(64);
-        let tx_clone  = tx.clone();
+        let tx_clone = tx.clone();
 
         let mdns = MdnsAddressLookup::builder()
             .build(node.endpoint.id())
@@ -44,6 +45,7 @@ impl MdnsDiscovery {
 
         info!(short_id = %node.short_id(), "mDNS discovery started");
 
+        let lookup = mdns.clone();
         tokio::spawn(async move {
             let mut stream = mdns.subscribe().await;
             loop {
@@ -69,7 +71,10 @@ impl MdnsDiscovery {
             }
         });
 
-        Ok(Self { tx })
+        Ok(Self {
+            tx,
+            _lookup: lookup,
+        })
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<DiscoveryEvent> {

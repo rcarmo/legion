@@ -15,7 +15,7 @@ use legion_core::{
     traits::ToolRegistry,
     types::{EffectClass, ToolDefinition},
 };
-use legion_namespace::{Namespace, NodeKind};
+use legion_namespace::{FunctionNamespace, Namespace, NodeKind};
 
 use crate::invoke::{InvokeRequest, Invoker};
 use crate::manifest::{FunctionManifest, FunctionRuntime};
@@ -29,7 +29,11 @@ pub struct RegistryBridge {
 
 impl RegistryBridge {
     pub fn new(namespace: Namespace, bun_invoker: Arc<dyn Invoker>) -> Self {
-        Self { namespace, bun_invoker, wasm_invoker: None }
+        Self {
+            namespace,
+            bun_invoker,
+            wasm_invoker: None,
+        }
     }
 
     pub fn with_wasm(mut self, wasm_invoker: Arc<dyn Invoker>) -> Self {
@@ -52,7 +56,9 @@ impl RegistryBridge {
     async fn load_manifest(&self, name: &str) -> Option<FunctionManifest> {
         let path = format!("/fn/{name}/manifest.json");
         let node = self.namespace.get(&path).await?;
-        let NodeKind::Json(value) = node.kind else { return None };
+        let NodeKind::Json(value) = node.kind else {
+            return None;
+        };
         serde_json::from_value(value).ok()
     }
 
@@ -67,34 +73,52 @@ impl RegistryBridge {
 }
 
 #[async_trait]
+impl FunctionNamespace for RegistryBridge {
+    async fn invoke(&self, name: &str, data: &[u8]) -> Result<Vec<u8>> {
+        let args = serde_json::from_slice(data).map_err(LegionError::Serialization)?;
+        let value = self.dispatch(&format!("fn.{name}"), args).await?;
+        serde_json::to_vec(&value).map_err(LegionError::Serialization)
+    }
+}
+
+#[async_trait]
 impl ToolRegistry for RegistryBridge {
     async fn definitions(&self) -> Vec<ToolDefinition> {
-        self.load_manifests().await.into_iter().map(|manifest| ToolDefinition {
-            name:        format!("fn.{}", manifest.name),
-            description: manifest.description,
-            parameters:  manifest.parameters,
-            effect:      if manifest.idempotent {
-                EffectClass::Idempotent
-            } else {
-                EffectClass::Write
-            },
-        }).collect()
+        self.load_manifests()
+            .await
+            .into_iter()
+            .map(|manifest| ToolDefinition {
+                name: format!("fn.{}", manifest.name),
+                description: manifest.description,
+                parameters: manifest.parameters,
+                effect: if manifest.idempotent {
+                    EffectClass::Idempotent
+                } else {
+                    EffectClass::Write
+                },
+            })
+            .collect()
     }
 
     async fn dispatch(&self, name: &str, args: Value) -> Result<Value> {
-        let function_name = name.strip_prefix("fn.")
+        let function_name = name
+            .strip_prefix("fn.")
             .ok_or_else(|| LegionError::ToolNotFound(name.into()))?;
-        let manifest = self.load_manifest(function_name).await
+        let manifest = self
+            .load_manifest(function_name)
+            .await
             .ok_or_else(|| LegionError::ToolNotFound(name.into()))?;
         let invoker = self.invoker_for(&manifest.runtime)?;
 
         debug!(function_name, runtime = ?manifest.runtime, "dispatching namespace function");
 
-        let result = invoker.invoke(InvokeRequest {
-            function_name: function_name.to_string(),
-            call_id:       uuid::Uuid::new_v4().to_string(),
-            args,
-        }).await?;
+        let result = invoker
+            .invoke(InvokeRequest {
+                function_name: function_name.to_string(),
+                call_id: uuid::Uuid::new_v4().to_string(),
+                args,
+            })
+            .await?;
 
         if let Some(error) = result.error {
             return Err(LegionError::ToolError(format!("{function_name}: {error}")));
@@ -132,10 +156,12 @@ mod tests {
             description: format!("{name} test function"),
             idempotent: false,
         };
-        namespace.set_json(
-            &format!("/fn/{name}/manifest.json"),
-            serde_json::to_value(manifest).unwrap(),
-        ).await;
+        namespace
+            .set_json(
+                &format!("/fn/{name}/manifest.json"),
+                serde_json::to_value(manifest).unwrap(),
+            )
+            .await;
     }
 
     #[tokio::test]
@@ -157,8 +183,14 @@ mod tests {
         let bridge = RegistryBridge::new(namespace, Arc::new(TaggedInvoker("bun")))
             .with_wasm(Arc::new(TaggedInvoker("wasm")));
 
-        assert_eq!(bridge.dispatch("fn.script", Value::Null).await.unwrap()["runtime"], "bun");
-        assert_eq!(bridge.dispatch("fn.module", Value::Null).await.unwrap()["runtime"], "wasm");
+        assert_eq!(
+            bridge.dispatch("fn.script", Value::Null).await.unwrap()["runtime"],
+            "bun"
+        );
+        assert_eq!(
+            bridge.dispatch("fn.module", Value::Null).await.unwrap()["runtime"],
+            "wasm"
+        );
     }
 
     #[tokio::test]

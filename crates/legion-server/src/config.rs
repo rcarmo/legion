@@ -1,7 +1,7 @@
 //! Server configuration loaded from `legion.toml`.
 
-use serde::{Deserialize, Serialize};
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 
 use legion_cluster::node::NodeConfig;
 use legion_runtime::InvocationLimits;
@@ -40,6 +40,12 @@ pub struct ServerConfig {
     pub raft_secret: String,
     #[serde(default)]
     pub raft_api_secret: String,
+    /// Raft bind address advertised through mDNS when distributed mode is enabled.
+    #[serde(default = "default_raft_addr")]
+    pub raft_addr: String,
+    /// Hiqlite API bind address advertised through mDNS.
+    #[serde(default = "default_raft_api_addr")]
+    pub raft_api_addr: String,
     /// Shared limits applied to direct and agent-issued function invocations.
     #[serde(default)]
     pub invocation: InvocationLimits,
@@ -57,11 +63,24 @@ pub struct SessionRateLimit {
 
 impl Default for SessionRateLimit {
     fn default() -> Self {
-        Self { max_requests_per_window: 30, window_ms: 60_000 }
+        Self {
+            max_requests_per_window: 30,
+            window_ms: 60_000,
+        }
     }
 }
 
-fn default_raft_node_id() -> u64 { 1 }
+fn default_raft_node_id() -> u64 {
+    1
+}
+
+fn default_raft_addr() -> String {
+    "0.0.0.0:17001".into()
+}
+
+fn default_raft_api_addr() -> String {
+    "0.0.0.0:17002".into()
+}
 
 /// Model / provider settings.
 /// API keys are read from environment variables by rs-ai automatically
@@ -80,7 +99,8 @@ impl Default for ModelConfig {
             default_model: "anthropic/claude-haiku-3-5".into(),
             system_prompt: Some(
                 "You are a Legion cluster agent. You manage durable function sessions \
-                 and can introspect and control the cluster via built-in tools.".into()
+                 and can introspect and control the cluster via built-in tools."
+                    .into(),
             ),
         }
     }
@@ -99,11 +119,12 @@ mod tests {
 
     #[test]
     fn packaged_systemd_config_matches_schema() {
-        let config: ServerConfig = toml::from_str(include_str!(
-            "../../../contrib/systemd/legion.toml"
-        )).unwrap();
+        let config: ServerConfig =
+            toml::from_str(include_str!("../../../contrib/systemd/legion.toml")).unwrap();
         assert_eq!(config.cluster.data_dir.to_string_lossy(), "/var/lib/legion");
         assert_eq!(config.cluster.api_port, 8080);
+        assert_eq!(config.raft_addr, "0.0.0.0:17001");
+        assert_eq!(config.raft_api_addr, "0.0.0.0:17002");
         assert_eq!(config.invocation.timeout_ms, 30_000);
         assert_eq!(config.invocation.max_requests_per_window, 120);
         assert_eq!(config.session_rate_limit.max_requests_per_window, 30);

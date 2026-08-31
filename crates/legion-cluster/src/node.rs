@@ -1,9 +1,9 @@
 //! Node identity: keypair persistence and iroh endpoint management.
 
-use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
-use iroh::{endpoint::presets, EndpointId, SecretKey};
+use iroh::{EndpointId, SecretKey, endpoint::presets};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use tracing::info;
 
 // ── NodeConfig ────────────────────────────────────────────────────────────────
@@ -27,17 +27,23 @@ pub struct NodeConfig {
 impl Default for NodeConfig {
     fn default() -> Self {
         Self {
-            data_dir:  PathBuf::from("/var/lib/legion"),
+            data_dir: PathBuf::from("/var/lib/legion"),
             bind_addr: default_bind_addr(),
-            api_port:  default_api_port(),
-            mdns:      true,
+            api_port: default_api_port(),
+            mdns: true,
         }
     }
 }
 
-fn default_bind_addr() -> String { "0.0.0.0:0".into() }
-fn default_api_port()  -> u16    { 8080 }
-fn default_true()      -> bool   { true }
+fn default_bind_addr() -> String {
+    "0.0.0.0:0".into()
+}
+fn default_api_port() -> u16 {
+    8080
+}
+fn default_true() -> bool {
+    true
+}
 
 // ── NodeIdentity ──────────────────────────────────────────────────────────────
 
@@ -46,7 +52,7 @@ fn default_true()      -> bool   { true }
 pub struct NodeIdentity {
     pub secret_key: SecretKey,
     /// Human-friendly abbreviated endpoint id (first 8 chars of string form).
-    pub short_id:   String,
+    pub short_id: String,
 }
 
 impl NodeIdentity {
@@ -59,7 +65,8 @@ impl NodeIdentity {
         let secret_key = if key_path.exists() {
             let bytes = std::fs::read(&key_path)
                 .with_context(|| format!("read key from {}", key_path.display()))?;
-            let arr: [u8; 32] = bytes.try_into()
+            let arr: [u8; 32] = bytes
+                .try_into()
                 .map_err(|_| anyhow::anyhow!("invalid key file: expected 32 bytes"))?;
             SecretKey::from_bytes(&arr)
         } else {
@@ -70,10 +77,13 @@ impl NodeIdentity {
             key
         };
 
-        let public  = secret_key.public();
+        let public = secret_key.public();
         let short_id = public.to_string().chars().take(8).collect();
 
-        Ok(Self { secret_key, short_id })
+        Ok(Self {
+            secret_key,
+            short_id,
+        })
     }
 }
 
@@ -83,7 +93,7 @@ impl NodeIdentity {
 pub struct ClusterNode {
     pub identity: NodeIdentity,
     pub endpoint: iroh::Endpoint,
-    pub config:   NodeConfig,
+    pub config: NodeConfig,
 }
 
 impl ClusterNode {
@@ -98,6 +108,9 @@ impl ClusterNode {
 
         let endpoint = iroh::Endpoint::builder(presets::N0)
             .secret_key(identity.secret_key.clone())
+            .clear_ip_transports()
+            .bind_addr(&config.bind_addr)
+            .context("configure iroh bind address")?
             .bind()
             .await
             .context("bind iroh endpoint")?;
@@ -105,7 +118,11 @@ impl ClusterNode {
         let addr = endpoint.addr();
         info!(addr = ?addr, "iroh endpoint bound");
 
-        Ok(Self { identity, endpoint, config })
+        Ok(Self {
+            identity,
+            endpoint,
+            config,
+        })
     }
 
     /// Returns the iroh `EndpointId` (public key) for this node.

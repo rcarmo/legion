@@ -4,31 +4,36 @@ mod api;
 mod auth;
 mod cli;
 mod config;
+mod namespace_resources;
 mod rate_limit;
 mod tools;
 
-use std::sync::Arc;
 use anyhow::{Context, Result};
 use clap::Parser;
+use std::sync::Arc;
 use tracing::{info, warn};
 
-use legion_cluster::{bootstrap::run_bootstrap, membership::start_membership, node::ClusterNode, BootstrapOutcome};
+use legion_cluster::{
+    BootstrapOutcome, NinePClient, RaftAdvertisement, bootstrap::run_bootstrap_with_raft,
+    membership::start_membership, node::ClusterNode, serve_namespace_and_gossip,
+};
 use legion_core::ChainRegistry;
 use legion_deploy::DeployPipeline;
 use legion_loop::driver::LegionLoop;
-use legion_namespace::Namespace;
-use legion_runtime::{
-    bun::BunRuntime, registry_bridge::RegistryBridge, BoundedInvoker,
-    InvocationMetrics,
-};
+use legion_namespace::{LegionNamespace, Namespace, SessionResources};
 #[cfg(feature = "wasm")]
 use legion_runtime::wasm::WasmRuntime;
-use legion_store::SqliteStore;
+use legion_runtime::{
+    BoundedInvoker, InvocationMetrics, bun::BunRuntime, registry_bridge::RegistryBridge,
+};
 #[cfg(feature = "distributed")]
 use legion_store::HiqliteStore;
+#[cfg(not(feature = "distributed"))]
+use legion_store::SqliteStore;
 
 use api::AppState;
 use config::ServerConfig;
+use namespace_resources::{ServerClusterNamespace, ServerDeployNamespace};
 use rate_limit::SessionRateLimiter;
 use tools::BuiltinToolRegistry;
 
@@ -79,15 +84,23 @@ async fn run_server() -> Result<()> {
     };
 
     // Allow env overrides (useful for testing/CI)
-    if let Ok(port) = std::env::var("LEGION_API_PORT") {
-        if let Ok(p) = port.parse::<u16>() { cfg.cluster.api_port = p; }
+    if let Ok(port) = std::env::var("LEGION_API_PORT")
+        && let Ok(p) = port.parse::<u16>()
+    {
+        cfg.cluster.api_port = p;
     }
     if let Ok(dir) = std::env::var("LEGION_DATA_DIR") {
         cfg.cluster.data_dir = std::path::PathBuf::from(dir);
     }
     apply_env(&mut cfg.invocation.timeout_ms, "LEGION_INVOKE_TIMEOUT_MS");
-    apply_env(&mut cfg.invocation.max_input_bytes, "LEGION_INVOKE_MAX_INPUT_BYTES");
-    apply_env(&mut cfg.invocation.max_output_bytes, "LEGION_INVOKE_MAX_OUTPUT_BYTES");
+    apply_env(
+        &mut cfg.invocation.max_input_bytes,
+        "LEGION_INVOKE_MAX_INPUT_BYTES",
+    );
+    apply_env(
+        &mut cfg.invocation.max_output_bytes,
+        "LEGION_INVOKE_MAX_OUTPUT_BYTES",
+    );
     apply_env(
         &mut cfg.invocation.max_concurrent_per_function,
         "LEGION_INVOKE_MAX_CONCURRENT_PER_FUNCTION",
@@ -96,7 +109,10 @@ async fn run_server() -> Result<()> {
         &mut cfg.invocation.max_requests_per_window,
         "LEGION_INVOKE_MAX_REQUESTS_PER_WINDOW",
     );
-    apply_env(&mut cfg.invocation.rate_window_ms, "LEGION_INVOKE_RATE_WINDOW_MS");
+    apply_env(
+        &mut cfg.invocation.rate_window_ms,
+        "LEGION_INVOKE_RATE_WINDOW_MS",
+    );
     apply_env(
         &mut cfg.session_rate_limit.max_requests_per_window,
         "LEGION_SESSION_MAX_REQUESTS_PER_WINDOW",
@@ -115,13 +131,30 @@ async fn run_server() -> Result<()> {
     // ── Cluster node ─────────────────────────────────────────────────────────
     let node = Arc::new(ClusterNode::start(cfg.cluster.clone()).await?);
     info!(node_id = %node.endpoint_id(), "cluster node ready");
+    let _mdns_discovery = if cfg.cluster.mdns {
+        Some(legion_cluster::discovery::MdnsDiscovery::start(&node).await?)
+    } else {
+        None
+    };
 
-    let outcome = run_bootstrap(&node).await?;
+    let outcome = run_bootstrap_with_raft(
+        &node,
+        RaftAdvertisement {
+            node_id: Some(cfg.raft_node_id),
+            raft_addr: Some(cfg.raft_addr.clone()),
+            api_addr: Some(cfg.raft_api_addr.clone()),
+        },
+    )
+    .await?;
     match &outcome {
-        BootstrapOutcome::Bootstrap { endpoint_id } =>
-            info!(%endpoint_id, "bootstrapped as single-node leader"),
-        BootstrapOutcome::Join { endpoint_id, peers } =>
-            info!(%endpoint_id, ?peers, "joining cluster (hiqlite handshake pending M3)"),
+        BootstrapOutcome::Bootstrap { endpoint_id, .. } => {
+            info!(%endpoint_id, "bootstrapped as single-node leader")
+        }
+        BootstrapOutcome::Join {
+            endpoint_id, peers, ..
+        } => {
+            info!(%endpoint_id, ?peers, "discovered existing cluster")
+        }
     }
 
     // ── Storage ───────────────────────────────────────────────────────────────
@@ -129,32 +162,78 @@ async fn run_server() -> Result<()> {
 
     // Choose store: multi-node Raft (hiqlite) or single-node SQLite.
     let arc_store: Arc<dyn legion_core::traits::EventStore>;
+    #[cfg(feature = "distributed")]
+    let cluster_store: Arc<HiqliteStore>;
 
     #[cfg(feature = "distributed")]
-    if !cfg.raft_peers.is_empty() {
+    {
         use hiqlite::{Node, NodeConfig as HqlNodeConfig};
         let data_dir = cfg.cluster.data_dir.join("raft");
-        let peers: Vec<Node> = cfg.raft_peers.iter().map(|p| Node {
-            id:        p.id,
-            addr_raft: p.addr_raft.clone(),
-            addr_api:  p.addr_api.clone(),
-        }).collect();
+        let mut peers: Vec<Node> = cfg
+            .raft_peers
+            .iter()
+            .map(|p| Node {
+                id: p.id,
+                addr_raft: p.addr_raft.clone(),
+                addr_api: p.addr_api.clone(),
+            })
+            .collect();
+        if let BootstrapOutcome::Join {
+            peers: discovered, ..
+        } = &outcome
+        {
+            for peer in discovered {
+                let (Some(id), Some(addr_raft), Some(addr_api)) = (
+                    peer.raft_id,
+                    peer.raft_addr.clone(),
+                    peer.raft_api_addr.clone(),
+                ) else {
+                    continue;
+                };
+                if !peers.iter().any(|node| node.id == id) {
+                    peers.push(Node {
+                        id,
+                        addr_raft,
+                        addr_api,
+                    });
+                }
+            }
+        }
+        if !peers.iter().any(|peer| peer.id == cfg.raft_node_id) {
+            peers.push(Node {
+                id: cfg.raft_node_id,
+                addr_raft: cfg.raft_addr.clone(),
+                addr_api: cfg.raft_api_addr.clone(),
+            });
+        }
+        let listen_addr_raft = cfg
+            .raft_addr
+            .rsplit_once(':')
+            .map(|(host, _)| host.to_string())
+            .unwrap_or_else(|| "0.0.0.0".into());
+        let listen_addr_api = cfg
+            .raft_api_addr
+            .rsplit_once(':')
+            .map(|(host, _)| host.to_string())
+            .unwrap_or_else(|| "0.0.0.0".into());
         let hql_cfg = HqlNodeConfig {
-            node_id:     cfg.raft_node_id,
-            nodes:       peers,
-            data_dir:    data_dir.to_string_lossy().to_string().into(),
+            node_id: cfg.raft_node_id,
+            nodes: peers,
+            listen_addr_api: listen_addr_api.into(),
+            listen_addr_raft: listen_addr_raft.into(),
+            data_dir: data_dir.to_string_lossy().to_string().into(),
             secret_raft: cfg.raft_secret.clone(),
-            secret_api:  cfg.raft_api_secret.clone(),
+            secret_api: cfg.raft_api_secret.clone(),
+            learner_only: false,
             ..Default::default()
         };
-        info!(node_id = cfg.raft_node_id, peers = cfg.raft_peers.len(), "starting distributed hiqlite store");
-        let hs = HiqliteStore::connect(hql_cfg).await?;
-        arc_store = Arc::new(hs);
-    } else {
-        let db_path = cfg.cluster.data_dir.join("sessions.db");
-        let s = SqliteStore::open(&db_path)?;
-        info!(db = %db_path.display(), "event store ready (sqlite)");
-        arc_store = Arc::new(s);
+        info!(
+            node_id = cfg.raft_node_id,
+            peers = cfg.raft_peers.len(),
+            "starting distributed hiqlite store"
+        );
+        cluster_store = Arc::new(HiqliteStore::connect(hql_cfg).await?);
+        arc_store = cluster_store.clone();
     }
 
     #[cfg(not(feature = "distributed"))]
@@ -167,12 +246,24 @@ async fn run_server() -> Result<()> {
 
     // ── Namespace ─────────────────────────────────────────────────────────────
     let namespace = Namespace::new();
-    namespace.set_json("/cluster/self", serde_json::json!({
-        "endpoint_id": node.endpoint_id().to_string(),
-        "short_id":    node.short_id(),
-    })).await;
+    namespace
+        .set_json(
+            "/cluster/self",
+            serde_json::json!({
+                "endpoint_id": node.endpoint_id().to_string(),
+                "short_id":    node.short_id(),
+            }),
+        )
+        .await;
 
     // ── Gossip peer membership ─────────────────────────────────────────────────
+    let gossip_bootstrap = match &outcome {
+        BootstrapOutcome::Join { peers, .. } => peers
+            .iter()
+            .filter_map(|peer| peer.endpoint_id.parse().ok())
+            .collect(),
+        BootstrapOutcome::Bootstrap { .. } => Vec::new(),
+    };
     let ns_peers = namespace.clone();
     let _membership = start_membership(
         &node,
@@ -187,23 +278,30 @@ async fn run_server() -> Result<()> {
                         "api_port":    p.api_port,
                         "last_seen":   p.timestamp,
                     }),
-                ).await;
+                )
+                .await;
             });
         },
         |eid| tracing::info!(%eid, "peer left cluster"),
         std::time::Duration::from_secs(5),
-    ).await.unwrap_or_else(|e| {
+        gossip_bootstrap,
+    )
+    .await
+    .unwrap_or_else(|e| {
         warn!("gossip membership unavailable (solo mode): {e}");
         legion_cluster::MembershipHandle::noop()
     });
 
     // ── Deploy pipeline ───────────────────────────────────────────────────────
-    let fn_root  = cfg.cluster.data_dir.join("fn");
+    let fn_root = cfg.cluster.data_dir.join("fn");
     let deployer = Arc::new(DeployPipeline::new(fn_root.clone(), namespace.clone()));
 
     // ── Tool registries ───────────────────────────────────────────────────────
     let invocation_metrics = Arc::new(InvocationMetrics::default());
-    let bun_backend = Arc::new(BunRuntime { fn_root, ..Default::default() });
+    let bun_backend = Arc::new(BunRuntime {
+        fn_root,
+        ..Default::default()
+    });
     let bun_runtime: Arc<dyn legion_runtime::invoke::Invoker> = Arc::new(BoundedInvoker::new(
         bun_backend,
         "bun",
@@ -233,16 +331,65 @@ async fn run_server() -> Result<()> {
     ));
     let tools = Arc::new(ChainRegistry::new(vec![
         builtins as Arc<dyn legion_core::traits::ToolRegistry>,
-        bridge   as Arc<dyn legion_core::traits::ToolRegistry>,
+        bridge.clone() as Arc<dyn legion_core::traits::ToolRegistry>,
     ]));
 
     // ── Agent loop ────────────────────────────────────────────────────────────
     let lp = Arc::new(LegionLoop::new(arc_store.clone(), tools));
     info!("agent loop ready (model: {})", cfg.model.default_model);
 
+    let deploy_resources = Arc::new(ServerDeployNamespace::new(
+        deployer.clone(),
+        namespace.clone(),
+    ));
+    #[cfg(feature = "distributed")]
+    let cluster_resources = Arc::new(ServerClusterNamespace::new(
+        node.clone(),
+        namespace.clone(),
+        cluster_store.clone(),
+    ));
+    #[cfg(not(feature = "distributed"))]
+    let cluster_resources = Arc::new(ServerClusterNamespace::new(node.clone(), namespace.clone()));
+    let ninep_namespace = LegionNamespace::new(namespace.clone())
+        .with_resources(Arc::new(SessionResources::new(
+            arc_store.clone(),
+            lp.clone(),
+        )))
+        .with_functions(bridge.clone())
+        .with_deploy(deploy_resources)
+        .with_cluster(cluster_resources);
+    if let BootstrapOutcome::Join { peers, .. } = &outcome {
+        for peer in peers {
+            match peer.endpoint_id.parse() {
+                Ok(endpoint_id) => {
+                    match NinePClient::connect_endpoint(&node.endpoint, endpoint_id).await {
+                        Ok(client) => {
+                            ninep_namespace
+                                .register_peer(peer.endpoint_id.clone(), Arc::new(client))
+                                .await;
+                        }
+                        Err(error) => {
+                            warn!(peer = %peer.endpoint_id, %error, "9P peer connection unavailable")
+                        }
+                    }
+                }
+                Err(error) => warn!(peer = %peer.endpoint_id, %error, "invalid peer endpoint id"),
+            }
+        }
+    }
+    let gossip = _membership
+        .gossip()
+        .ok_or_else(|| anyhow::anyhow!("gossip membership unavailable"))?;
+    let _iroh_router = serve_namespace_and_gossip(&node, ninep_namespace, gossip);
+    info!(alpns = "9p, /iroh-gossip/1", "iroh protocol router ready");
+
     // ── REST API ──────────────────────────────────────────────────────────────
     let api_key = std::env::var("LEGION_API_KEY").ok().or(cfg.api_key.clone());
-    if api_key.is_some() { info!("API key authentication enabled"); } else { warn!("no API key set — server is open"); }
+    if api_key.is_some() {
+        info!("API key authentication enabled");
+    } else {
+        warn!("no API key set — server is open");
+    }
     let state = Arc::new(AppState {
         store: arc_store,
         lp,
@@ -254,7 +401,7 @@ async fn run_server() -> Result<()> {
         invocation_metrics,
         session_rate_limiter: Arc::new(SessionRateLimiter::new(cfg.session_rate_limit)),
     });
-    let addr  = format!("0.0.0.0:{}", cfg.cluster.api_port);
+    let addr = format!("0.0.0.0:{}", cfg.cluster.api_port);
     api::serve(state, addr, api_key).await?;
     Ok(())
 }

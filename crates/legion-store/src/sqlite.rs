@@ -109,7 +109,7 @@ impl EventStore for SqliteStore {
 
         let kind_tag = event_kind_tag(&event.kind);
         let payload  = event.payload.as_ref()
-            .map(|v| serde_json::to_string(v))
+            .map(serde_json::to_string)
             .transpose()?;
 
         conn.execute(

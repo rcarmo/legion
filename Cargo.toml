@@ -61,7 +61,8 @@ iroh-mdns-address-lookup = "0.5"
 mdns-sd                  = "0.21"
 
 # 9P namespace (Milestone 2+)
-jetstream_9p = "16"
+jetstream_9p  = "16"
+jetstream_rpc = "16"
 
 # WASM runtime (Milestone 3+)
 wasmtime = { version = "48", features = ["cranelift", "component-model"] }

@@ -26,7 +26,14 @@
 //!   peers/          — one entry per known iroh peer
 //! ```
 
+pub mod ninep;
+pub mod resources;
 pub mod tree;
 pub mod watch;
 
+pub use ninep::LegionNamespace;
+pub use resources::{
+    ClusterNamespace, DeployNamespace, FunctionNamespace, NamespaceResources, PeerNamespace,
+    SessionResources,
+};
 pub use tree::{Namespace, Node, NodeKind};

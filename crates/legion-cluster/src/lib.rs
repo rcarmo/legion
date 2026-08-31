@@ -1,12 +1,19 @@
-pub mod node;
-pub mod discovery;
 pub mod bonjour;
 pub mod bootstrap;
+pub mod discovery;
 pub mod membership;
+pub mod ninep;
+pub mod node;
 
+pub use bootstrap::{
+    BootstrapOutcome, DiscoveredPeer, RaftAdvertisement, run_bootstrap_with_raft,
+    run_bootstrap_with_window,
+};
+pub use membership::{MembershipHandle, NodePresence, start_membership};
+pub use ninep::{
+    NINEP_ALPN, NamespaceProtocol, NinePClient, serve_namespace, serve_namespace_and_gossip,
+};
 pub use node::{ClusterNode, NodeConfig, NodeIdentity};
-pub use bootstrap::BootstrapOutcome;
-pub use membership::{start_membership, MembershipHandle, NodePresence};
 
 #[cfg(test)]
 mod tests {
@@ -29,7 +36,10 @@ mod tests {
         let node = ClusterNode::start(test_config(&dir)).await.unwrap();
         let eid = node.endpoint_id();
         // Public key should be non-zero
-        assert_ne!(eid.to_string(), "0000000000000000000000000000000000000000000000000000000000000000");
+        assert_ne!(
+            eid.to_string(),
+            "0000000000000000000000000000000000000000000000000000000000000000"
+        );
     }
 
     #[tokio::test]

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use serde_json::Value;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 use tracing::debug;
 
 use crate::watch::WatchEvent;
@@ -23,10 +23,19 @@ pub enum NodeKind {
     Json(Value),
 }
 
+impl NodeKind {
+    pub fn as_json(&self) -> Option<&Value> {
+        match self {
+            Self::Json(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
 /// A single node in the namespace tree.
 #[derive(Debug, Clone)]
 pub struct Node {
-    pub kind:       NodeKind,
+    pub kind: NodeKind,
     pub updated_at: i64,
 }
 
@@ -40,7 +49,7 @@ pub struct Node {
 #[derive(Clone)]
 pub struct Namespace {
     inner: Arc<RwLock<NamespaceInner>>,
-    tx:    broadcast::Sender<WatchEvent>,
+    tx: broadcast::Sender<WatchEvent>,
 }
 
 struct NamespaceInner {
@@ -52,11 +61,46 @@ impl Namespace {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(256);
         let mut nodes = HashMap::new();
-        for dir in ["/", "/fn", "/sessions", "/deploy", "/cluster", "/cluster/peers"] {
-            nodes.insert(dir.to_string(), Node {
-                kind:       NodeKind::Dir,
-                updated_at: now_ms(),
-            });
+        for dir in [
+            "/",
+            "/fn",
+            "/sessions",
+            "/deploy",
+            "/deploy/blobs",
+            "/cluster",
+            "/cluster/peers",
+            "/peers",
+        ] {
+            nodes.insert(
+                dir.to_string(),
+                Node {
+                    kind: NodeKind::Dir,
+                    updated_at: now_ms(),
+                },
+            );
+        }
+        for path in [
+            "/sessions/new",
+            "/deploy/register",
+            "/deploy/route",
+            "/deploy/promote",
+        ] {
+            nodes.insert(
+                path.to_string(),
+                Node {
+                    kind: NodeKind::Blob(Bytes::new()),
+                    updated_at: now_ms(),
+                },
+            );
+        }
+        for path in ["/cluster/leader", "/cluster/health", "/cluster/self"] {
+            nodes.insert(
+                path.to_string(),
+                Node {
+                    kind: NodeKind::Json(Value::Null),
+                    updated_at: now_ms(),
+                },
+            );
         }
         Self {
             inner: Arc::new(RwLock::new(NamespaceInner { nodes })),
@@ -67,6 +111,11 @@ impl Namespace {
     /// Read a node by path.
     pub async fn get(&self, path: &str) -> Option<Node> {
         self.inner.read().await.nodes.get(path).cloned()
+    }
+
+    /// Ensure a directory exists, creating parent directories as needed.
+    pub async fn ensure_dir(&self, path: &str) {
+        self.write_node(path, NodeKind::Dir).await;
     }
 
     /// Write a JSON value to a path, creating parent dirs as needed.
@@ -83,18 +132,26 @@ impl Namespace {
     pub async fn delete(&self, path: &str) {
         let mut inner = self.inner.write().await;
         let prefix = format!("{}/", path.trim_end_matches('/'));
-        inner.nodes.retain(|k, _| k != path && !k.starts_with(&prefix));
+        inner
+            .nodes
+            .retain(|k, _| k != path && !k.starts_with(&prefix));
         drop(inner);
-        let _ = self.tx.send(WatchEvent::Deleted { path: path.to_string() });
+        let _ = self.tx.send(WatchEvent::Deleted {
+            path: path.to_string(),
+        });
     }
 
     /// List direct children of a directory path.
     pub async fn ls(&self, dir: &str) -> Vec<String> {
-        let dir   = dir.trim_end_matches('/');
+        let dir = dir.trim_end_matches('/');
         let inner = self.inner.read().await;
-        inner.nodes.keys()
+        inner
+            .nodes
+            .keys()
             .filter(|k| {
-                if *k == dir { return false; }
+                if *k == dir {
+                    return false;
+                }
                 let rest = k.strip_prefix(dir).unwrap_or("");
                 rest.starts_with('/') && !rest[1..].contains('/')
             })
@@ -118,25 +175,35 @@ impl Namespace {
         parts.pop();
         let mut acc = String::new();
         for part in parts {
-            if part.is_empty() { acc.push('/'); continue; }
+            if part.is_empty() {
+                acc.push('/');
+                continue;
+            }
             acc = format!("{}/{}", acc.trim_end_matches('/'), part);
             inner.nodes.entry(acc.clone()).or_insert_with(|| Node {
-                kind:       NodeKind::Dir,
+                kind: NodeKind::Dir,
                 updated_at: ts,
             });
         }
 
-        let node = Node { kind, updated_at: ts };
+        let node = Node {
+            kind,
+            updated_at: ts,
+        };
         inner.nodes.insert(path.to_string(), node);
         drop(inner);
 
         debug!(path, "namespace write");
-        let _ = self.tx.send(WatchEvent::Updated { path: path.to_string() });
+        let _ = self.tx.send(WatchEvent::Updated {
+            path: path.to_string(),
+        });
     }
 }
 
 impl Default for Namespace {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 fn now_ms() -> i64 {
@@ -156,7 +223,11 @@ mod tests {
     #[tokio::test]
     async fn namespace_write_and_read() {
         let ns = Namespace::new();
-        ns.set_json("/fn/hello/manifest.json", json!({ "name": "hello", "runtime": "wasm" })).await;
+        ns.set_json(
+            "/fn/hello/manifest.json",
+            json!({ "name": "hello", "runtime": "wasm" }),
+        )
+        .await;
         let node = ns.get("/fn/hello/manifest.json").await.unwrap();
         assert!(matches!(node.kind, NodeKind::Json(_)));
     }
@@ -165,7 +236,7 @@ mod tests {
     async fn namespace_ls_children() {
         let ns = Namespace::new();
         ns.set_json("/fn/alpha/manifest.json", json!({})).await;
-        ns.set_json("/fn/beta/manifest.json",  json!({})).await;
+        ns.set_json("/fn/beta/manifest.json", json!({})).await;
         let mut children = ns.ls("/fn").await;
         children.sort();
         assert!(children.contains(&"alpha".to_string()));
@@ -174,9 +245,10 @@ mod tests {
 
     #[tokio::test]
     async fn namespace_watch_event() {
-        let ns  = Namespace::new();
+        let ns = Namespace::new();
         let mut rx = ns.watch();
-        ns.set_json("/cluster/self", json!({ "node": "test" })).await;
+        ns.set_json("/cluster/self", json!({ "node": "test" }))
+            .await;
         let ev = rx.try_recv().unwrap();
         assert!(matches!(ev, WatchEvent::Updated { path } if path == "/cluster/self"));
     }

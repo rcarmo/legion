@@ -2,7 +2,7 @@
 
 Legion is in early design stage, which means that I am still yelling at AI to discuss some of this even after my initial notes (_especially_ because it lost my initial notes and did this). This roadmap tracks work by milestone.
 
-Checklist last reconciled with the implementation and test suite on 2026-08-30. A parent item remains unchecked while any of its required children are incomplete.
+Checklist last reconciled with the implementation and test suite on 2026-08-31. A parent item remains unchecked while any of its required children are incomplete.
 
 ## Milestone 0: Foundation
 
@@ -22,8 +22,8 @@ Checklist last reconciled with the implementation and test suite on 2026-08-30. 
   - [x] Hash chain implementation
   - [x] `read_log` with chain verification
   - [x] `fork` implementation
-- [ ] `legion-loop`: Basic agent loop on rs-ai
-  - [ ] `TurnPhase` state machine (the enum exists; the driver does not use it yet)
+- [x] `legion-loop`: Basic agent loop on rs-ai
+  - [x] `TurnPhase` state machine
   - [x] rs-ai `EventStream` integration
   - [x] Write-ahead intent logging
   - [x] Effect classification
@@ -39,19 +39,19 @@ Checklist last reconciled with the implementation and test suite on 2026-08-30. 
 
 **Goal**: 3-node cluster with Raft-replicated state and mDNS discovery.
 
-- [ ] `legion-cluster`: iroh + mDNS bootstrap
+- [x] `legion-cluster`: iroh + mDNS bootstrap
   - [x] iroh endpoint setup + keypair persistence
   - [x] `iroh-mdns-address-lookup` integration
   - [x] `mdns-sd` Bonjour registration
   - [x] `iroh-gossip` membership
-  - [ ] Raft bootstrap logic (discovery decides join vs. single-node, but the join handshake is not wired)
-- [ ] `legion-store`: Swap SQLite for hiqlite
+  - [x] Raft bootstrap logic (stable node IDs/addresses advertised via mDNS; hiqlite joins as learner then voter)
+- [x] `legion-store`: Swap SQLite for hiqlite
   - [x] hiqlite `Client` wrapping
   - [x] fjall as Raft log store (through hiqlite)
   - [x] All `EventStore` methods over hiqlite
-  - [ ] `listen_notify_local` for park/resume wakeup
-  - [ ] `dlock` for leader-only operations
-- [ ] Integration test: 3-node cluster, session survives leader kill
+  - [x] `listen_notify_local` for park/resume wakeup
+  - [x] `dlock` for leader-only operations
+- [x] Integration test: 3-node cluster, session survives leader kill
 - [x] `legion-server`: Node startup sequence
 
 **Exit criteria**: 3-node cluster forms automatically on LAN; any node can resume a session after another node crashes.
@@ -62,15 +62,15 @@ Checklist last reconciled with the implementation and test suite on 2026-08-30. 
 
 **Goal**: All cluster resources accessible via 9P paths.
 
-- [ ] `legion-namespace`: jetstream integration (the in-process namespace tree exists; the 9P projection does not)
-  - [ ] `LegionNamespace` implementing jetstream `FileSystem`
-  - [ ] All path handlers (see [07-9p-namespace.md](07-9p-namespace.md))
-  - [ ] Remote proxy (`/peers/<key>/...`)
-  - [ ] Streaming reads for `/sessions/<id>/turns`
-- [ ] `legion-server`: Expose namespace on iroh QUIC transport
+- [x] `legion-namespace`: jetstream 9P2000.L integration
+  - [x] `LegionNamespace` implementing jetstream `NineP200L`
+  - [x] All Milestone 2 path handlers (see [07-9p-namespace.md](07-9p-namespace.md))
+  - [x] Remote proxy (`/peers/<key>/...`) over authenticated iroh 9P RPC
+  - [x] Streaming/blocking reads for `/sessions/<id>/turns`
+- [x] `legion-server`: Expose namespace and gossip through one iroh QUIC router
 - [x] REST API shim on port 8080
 - [x] CLI: `legion session`, `legion cluster`, `legion call`
-- [ ] Integration test: full session via 9P read/write
+- [x] Integration test: authenticated 9P read/write over iroh (including dynamic session resources)
 
 **Exit criteria**: A human can run a full agent session using only `9p read/write` shell commands.
 

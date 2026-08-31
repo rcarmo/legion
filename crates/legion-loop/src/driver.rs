@@ -21,7 +21,7 @@ use legion_core::{
     traits::{AgentLoopTrait, EventStore, ToolRegistry},
     types::{
         BudgetState, EffectClass, ExternalEvent, RunConfig, RunId, SessionStatus, TurnEnvelope,
-        TurnEvent, TurnEventKind,
+        TurnEvent, TurnEventKind, TurnPhase,
     },
 };
 
@@ -34,6 +34,34 @@ use crate::stream::SessionEvent;
 pub enum ReconcileAction {
     Skip,
     Retry,
+}
+
+/// Explicit phase tracker for a single model/tool turn.
+///
+/// Keeping phase transitions in one place makes invalid driver changes fail
+/// loudly in tests instead of silently creating an unrecoverable event order.
+#[derive(Debug)]
+struct TurnState {
+    phase: TurnPhase,
+}
+
+impl TurnState {
+    fn new() -> Self {
+        Self {
+            phase: TurnPhase::Setup,
+        }
+    }
+
+    fn transition(&mut self, expected: TurnPhase, next: TurnPhase) -> Result<()> {
+        if self.phase != expected {
+            return Err(LegionError::Store(format!(
+                "invalid turn phase transition: {:?} -> {:?} (expected {:?})",
+                self.phase, next, expected
+            )));
+        }
+        self.phase = next;
+        Ok(())
+    }
 }
 
 impl ReconcileAction {
@@ -230,6 +258,7 @@ impl LegionLoop {
             return Err(LegionError::BudgetExceeded(field));
         }
 
+        let mut turn_state = TurnState::new();
         let recent = self.store.read_recent(run_id, self.context_window).await?;
         let mut context = Context {
             system_prompt: config.system_prompt.clone(),
@@ -257,10 +286,16 @@ impl LegionLoop {
                 return Err(LegionError::BudgetExceeded(field));
             }
 
+            turn_state.transition(TurnPhase::Setup, TurnPhase::Running)?;
+
             // Refresh definitions on every model step so deployed or promoted tools
             // become visible without splitting streaming and non-streaming behavior.
             let tool_definitions = self.tools.definitions().await;
-            context.tools = tool_definitions
+            let enabled_definitions = tool_definitions
+                .iter()
+                .filter(|definition| config.tools.iter().any(|name| name == &definition.name))
+                .collect::<Vec<_>>();
+            context.tools = enabled_definitions
                 .iter()
                 .map(|definition| Tool {
                     name: definition.name.clone(),
@@ -372,6 +407,7 @@ impl LegionLoop {
             context = rs_ai::harness::append_assistant_message(context, &message);
 
             if tool_calls.is_empty() {
+                turn_state.transition(TurnPhase::Running, TurnPhase::Finalizing)?;
                 let halt_field = budget.exceeded_by(&config.budget);
                 if let Some(field) = &halt_field {
                     self.halt_budget(run_id, field.clone()).await?;
@@ -394,8 +430,11 @@ impl LegionLoop {
                 if let Some(budget_field) = halt_field {
                     Self::emit(sender, SessionEvent::BudgetHalt { budget_field }).await;
                 }
+                turn_state.transition(TurnPhase::Finalizing, TurnPhase::Completed)?;
                 return Ok(envelope);
             }
+
+            turn_state.transition(TurnPhase::Running, TurnPhase::Tools)?;
 
             // Turn/token/time budgets are step limits. Halt before dispatch only
             // when another model continuation is no longer permitted; the tool-call
@@ -440,7 +479,7 @@ impl LegionLoop {
                     },
                 )
                 .await;
-                let effect = tool_definitions
+                let effect = enabled_definitions
                     .iter()
                     .find(|definition| definition.name == tool_name)
                     .map(|definition| definition.effect.clone())
@@ -502,6 +541,8 @@ impl LegionLoop {
                     return Err(LegionError::BudgetExceeded(field));
                 }
             }
+
+            turn_state.transition(TurnPhase::Tools, TurnPhase::Setup)?;
         }
     }
 }
@@ -670,6 +711,25 @@ mod tests {
             Arc::new(MemoryEventStore::new()),
             Arc::new(EchoToolRegistry::new()),
         )
+    }
+
+    #[test]
+    fn turn_phase_state_machine_rejects_invalid_transitions() {
+        let mut state = TurnState::new();
+        state
+            .transition(TurnPhase::Setup, TurnPhase::Running)
+            .unwrap();
+        assert!(
+            state
+                .transition(TurnPhase::Setup, TurnPhase::Tools)
+                .is_err()
+        );
+        state
+            .transition(TurnPhase::Running, TurnPhase::Finalizing)
+            .unwrap();
+        state
+            .transition(TurnPhase::Finalizing, TurnPhase::Completed)
+            .unwrap();
     }
 
     #[tokio::test]

@@ -15,3 +15,10 @@ thiserror   = { workspace = true }
 anyhow      = { workspace = true }
 tracing     = { workspace = true }
 bytes       = { workspace = true }
+blake3      = { workspace = true }
+jetstream_9p = { workspace = true }
+jetstream_wireformat = "16"
+async-trait = { workspace = true }
+
+[dev-dependencies]
+legion-loop = { path = "../legion-loop" }

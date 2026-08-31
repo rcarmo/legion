@@ -22,3 +22,11 @@ uuid        = { workspace = true }
 chrono      = { workspace = true }
 rusqlite    = { workspace = true }
 hiqlite     = { workspace = true, optional = true }
+
+[[test]]
+name = "distributed_failover"
+path = "tests/distributed_failover.rs"
+required-features = ["distributed"]
+
+[dev-dependencies]
+tempfile = "3"

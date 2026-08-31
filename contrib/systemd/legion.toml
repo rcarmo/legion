@@ -1,8 +1,15 @@
 # Legion daemon configuration for the packaged systemd service.
 # Prefer LEGION_API_KEY in legion.env rather than putting secrets here.
 # api_key = "replace-with-a-long-random-token"
-# Distributed nodes additionally need top-level raft_peers, raft_node_id,
-# raft_secret, and raft_api_secret values here, before the table sections.
+# Distributed builds use hiqlite for both solo and multi-node operation.
+# Configure a unique raft_node_id and routable raft_addr/raft_api_addr on each
+# node. Peers can be listed explicitly with [[raft_peers]] or discovered from
+# the same values advertised through mDNS.
+raft_node_id = 1
+raft_addr = "0.0.0.0:17001"
+raft_api_addr = "0.0.0.0:17002"
+raft_secret = "replace-with-a-shared-raft-secret"
+raft_api_secret = "replace-with-a-shared-api-secret"
 
 [cluster]
 data_dir = "/var/lib/legion"

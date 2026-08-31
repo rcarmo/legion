@@ -6,11 +6,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use futures::StreamExt;
-use iroh_gossip::{
-    net::Gossip,
-    proto::TopicId,
-    api::Event,
-};
+use iroh_gossip::{api::Event, net::Gossip, proto::TopicId};
 use serde::{Deserialize, Serialize};
 use tokio::time::interval;
 use tracing::{debug, info, warn};
@@ -23,9 +19,9 @@ use crate::node::ClusterNode;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodePresence {
     pub endpoint_id: String,
-    pub short_id:    String,
-    pub api_port:    u16,
-    pub timestamp:   i64,
+    pub short_id: String,
+    pub api_port: u16,
+    pub timestamp: i64,
 }
 
 /// Returns the deterministic gossip topic ID for Legion cluster membership.
@@ -42,40 +38,47 @@ pub struct MembershipHandle {
 }
 
 impl MembershipHandle {
+    /// The protocol handler to register on the shared iroh router.
+    pub fn gossip(&self) -> Option<Gossip> {
+        self._gossip.clone()
+    }
+
     /// A no-op handle for solo mode when gossip is unavailable.
-    pub fn noop() -> Self { Self { _gossip: None } }
+    pub fn noop() -> Self {
+        Self { _gossip: None }
+    }
 }
 
 /// Start the membership gossip loop.
 ///
 /// Returns a `MembershipHandle`; dropping it stops the gossip session.
 pub async fn start_membership(
-    node:      &ClusterNode,
+    node: &ClusterNode,
     on_joined: impl Fn(NodePresence) + Send + Sync + 'static,
-    on_left:   impl Fn(String) + Send + Sync + 'static,
+    on_left: impl Fn(String) + Send + Sync + 'static,
     heartbeat: Duration,
+    bootstrap: Vec<iroh::EndpointId>,
 ) -> Result<MembershipHandle> {
-    let topic    = cluster_topic();
-    let short    = node.short_id().to_string();
+    let topic = cluster_topic();
+    let short = node.short_id().to_string();
     let api_port = node.config.api_port;
-    let eid_str  = node.endpoint_id().to_string();
+    let eid_str = node.endpoint_id().to_string();
 
     // Spawn gossip on the existing endpoint
-    let gossip = Gossip::builder()
-        .spawn(node.endpoint.clone());
+    let gossip = Gossip::builder().spawn(node.endpoint.clone());
 
     info!(%short, "gossip membership starting");
 
-    // Subscribe to the cluster topic (no bootstrap peers; rely on mDNS for initial contact)
+    // Subscribe and connect to peers discovered during the Bonjour bootstrap probe.
     let topic_sub = gossip
-        .subscribe(topic, vec![])
+        .subscribe_and_join(topic, bootstrap)
         .await
         .context("gossip subscribe")?;
 
     let (sender, mut receiver) = topic_sub.split();
 
     // Heartbeat task
-    let eid_hb   = eid_str.clone();
+    let eid_hb = eid_str.clone();
     let short_hb = short.clone();
     tokio::spawn(async move {
         let mut tick = interval(heartbeat);
@@ -83,14 +86,14 @@ pub async fn start_membership(
             tick.tick().await;
             let presence = NodePresence {
                 endpoint_id: eid_hb.clone(),
-                short_id:    short_hb.clone(),
+                short_id: short_hb.clone(),
                 api_port,
-                timestamp:   chrono::Utc::now().timestamp_millis(),
+                timestamp: chrono::Utc::now().timestamp_millis(),
             };
-            if let Ok(bytes) = serde_json::to_vec(&presence) {
-                if let Err(e) = sender.broadcast(Bytes::from(bytes)).await {
-                    warn!("gossip broadcast: {e}");
-                }
+            if let Ok(bytes) = serde_json::to_vec(&presence)
+                && let Err(e) = sender.broadcast(Bytes::from(bytes)).await
+            {
+                warn!("gossip broadcast: {e}");
             }
         }
     });
@@ -100,11 +103,11 @@ pub async fn start_membership(
         loop {
             match receiver.next().await {
                 Some(Ok(Event::Received(msg))) => {
-                    if let Ok(p) = serde_json::from_slice::<NodePresence>(&msg.content) {
-                        if p.endpoint_id != eid_str {
-                            debug!(peer = %p.short_id, "peer heartbeat");
-                            on_joined(p);
-                        }
+                    if let Ok(p) = serde_json::from_slice::<NodePresence>(&msg.content)
+                        && p.endpoint_id != eid_str
+                    {
+                        debug!(peer = %p.short_id, "peer heartbeat");
+                        on_joined(p);
                     }
                 }
                 Some(Ok(Event::NeighborUp(peer))) => {
@@ -126,5 +129,7 @@ pub async fn start_membership(
         }
     });
 
-    Ok(MembershipHandle { _gossip: Some(gossip) })
+    Ok(MembershipHandle {
+        _gossip: Some(gossip),
+    })
 }
