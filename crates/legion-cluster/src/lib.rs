@@ -12,6 +12,7 @@ pub use bootstrap::{
 pub use membership::{MembershipHandle, NodePresence, start_membership};
 pub use ninep::{
     NINEP_ALPN, NamespaceProtocol, NinePClient, serve_namespace, serve_namespace_and_gossip,
+    serve_namespace_tcp,
 };
 pub use node::{ClusterNode, NodeConfig, NodeIdentity};
 

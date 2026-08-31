@@ -42,6 +42,62 @@ pub fn serve_namespace_and_gossip(
         .spawn()
 }
 
+/// Serve the same authenticated 9P namespace over a local TCP socket for Bun
+/// functions. Distributed traffic continues to use authenticated iroh QUIC.
+pub async fn serve_namespace_tcp(
+    namespace: LegionNamespace,
+    addr: &str,
+) -> anyhow::Result<tokio::task::JoinHandle<()>> {
+    let socket: std::net::SocketAddr = addr.parse()?;
+    if !socket.ip().is_loopback() {
+        anyhow::bail!("9P TCP bridge must bind to a loopback address");
+    }
+    let listener = tokio::net::TcpListener::bind(socket).await?;
+    tracing::info!(%addr, "local 9P TCP bridge listening");
+    Ok(tokio::spawn(async move {
+        loop {
+            let Ok((stream, peer)) = listener.accept().await else { break };
+            if !peer.ip().is_loopback() {
+                tracing::warn!(%peer, "rejecting non-loopback 9P TCP client");
+                continue;
+            }
+            let handler = NinePServer::new(namespace.clone());
+            tokio::spawn(async move {
+                let (recv_stream, send_stream) = stream.into_split();
+                serve_connection(handler, recv_stream, send_stream).await;
+            });
+        }
+    }))
+}
+
+async fn serve_connection<R, W>(handler: LegionNineP, recv_stream: R, send_stream: W)
+where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+    W: tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let mut reader = FramedRead::new(recv_stream, ServerCodec::<LegionNineP>::new());
+    let mut writer = FramedWrite::new(send_stream, ServerCodec::<LegionNineP>::new());
+    let (responses, mut response_rx) = mpsc::channel::<Frame<_>>(256);
+    let writer_task = tokio::spawn(async move {
+        while let Some(response) = response_rx.recv().await {
+            if writer.send(response).await.is_err() { break; }
+        }
+    });
+    while let Some(request) = reader.next().await {
+        let Ok(request) = request else { break };
+        let mut handler = handler.clone();
+        let responses = responses.clone();
+        tokio::spawn(async move {
+            match handler.rpc(Context::default(), request).await {
+                Ok(response) => { let _ = responses.send(response).await; }
+                Err(error) => tracing::warn!(error = %error.into_error(), "9P request failed"),
+            }
+        });
+    }
+    drop(responses);
+    let _ = writer_task.await;
+}
+
 /// Minimal 9P client used for transparent peer path forwarding and integration tests.
 pub struct NinePClient {
     mux: Mux<LegionNineP>,
@@ -225,38 +281,7 @@ impl ProtocolHandler for NamespaceProtocol {
                 Err(_) => break,
             };
             let handler = self.inner.clone();
-            tokio::spawn(async move {
-                let mut reader = FramedRead::new(recv_stream, ServerCodec::<LegionNineP>::new());
-                let mut writer = FramedWrite::new(send_stream, ServerCodec::<LegionNineP>::new());
-                let (responses, mut response_rx) = mpsc::channel::<Frame<_>>(256);
-                let writer_task = tokio::spawn(async move {
-                    while let Some(response) = response_rx.recv().await {
-                        if writer.send(response).await.is_err() {
-                            break;
-                        }
-                    }
-                });
-                while let Some(request) = reader.next().await {
-                    let Ok(request) = request else { break };
-                    let mut handler = handler.clone();
-                    let responses = responses.clone();
-                    tokio::spawn(async move {
-                        match handler
-                            .rpc(jetstream_rpc::context::Context::default(), request)
-                            .await
-                        {
-                            Ok(response) => {
-                                let _ = responses.send(response).await;
-                            }
-                            Err(error) => {
-                                tracing::warn!(error = %error.into_error(), "9P request failed");
-                            }
-                        }
-                    });
-                }
-                drop(responses);
-                let _ = writer_task.await;
-            });
+            tokio::spawn(serve_connection(handler, recv_stream, send_stream));
         }
         Ok(())
     }

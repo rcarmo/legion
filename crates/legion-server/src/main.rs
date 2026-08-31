@@ -18,6 +18,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use legion_cluster::{
     BootstrapOutcome, NinePClient, RaftAdvertisement, bootstrap::run_bootstrap_with_raft,
     membership::start_membership, node::ClusterNode, serve_namespace_and_gossip,
+    serve_namespace_tcp,
 };
 use legion_core::ChainRegistry;
 use legion_deploy::DeployPipeline;
@@ -415,7 +416,12 @@ async fn run_server() -> Result<()> {
     let gossip = _membership
         .gossip()
         .ok_or_else(|| anyhow::anyhow!("gossip membership unavailable"))?;
+    let tcp_namespace = ninep_namespace.clone();
     let _iroh_router = serve_namespace_and_gossip(&node, ninep_namespace, gossip);
+    let _ninep_tcp = match cfg.ninep_tcp_addr.as_deref() {
+        Some(addr) => Some(serve_namespace_tcp(tcp_namespace, addr).await?),
+        None => None,
+    };
     info!(alpns = "9p, /iroh-gossip/1", "iroh protocol router ready");
 
     // ── REST API ──────────────────────────────────────────────────────────────

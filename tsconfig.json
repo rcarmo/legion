@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "allowImportingTsExtensions": true,
+    "declaration": true,
+    "skipLibCheck": true,
+    "types": ["bun"]
+  },
+  "include": ["packages/**/*.ts"]
+}

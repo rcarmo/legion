@@ -1,0 +1,9 @@
+{
+  "name": "@legion/channels",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": { "@legion/client": "workspace:*" },
+  "license": "MIT"
+}
