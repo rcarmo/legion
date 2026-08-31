@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{info, warn};
+use tracing::{Instrument, info, info_span, warn};
 use uuid::Uuid;
 
 use rs_ai::{
@@ -347,10 +347,22 @@ impl LegionLoop {
                 LegionError::LLMError("model stream ended without a terminal message".into())
             })?;
             let wall_ms = started_at.elapsed().as_millis() as u64;
-            let (tokens_in, tokens_out) = message
-                .usage
-                .as_ref()
-                .map_or((0, 0), |usage| (usage.input, usage.output));
+            let (tokens_in, tokens_out, cache_read, cache_write) =
+                message.usage.as_ref().map_or((0, 0, 0, 0), |usage| {
+                    (
+                        usage.input,
+                        usage.output,
+                        usage.cache_read,
+                        usage.cache_write,
+                    )
+                });
+            crate::telemetry::record_token_usage(
+                &config.model,
+                tokens_in,
+                tokens_out,
+                cache_read,
+                cache_write,
+            );
             let content = rs_ai::harness::get_text_content(&message);
             let tool_calls = message
                 .content
@@ -499,7 +511,13 @@ impl LegionLoop {
                     .set_status(run_id, SessionStatus::ToolPending)
                     .await?;
 
-                let (result, is_error) = match self.tools.dispatch(&tool_name, arguments).await {
+                let tool_span = info_span!("agent.tool", tool.name = %tool_name);
+                let (result, is_error) = match self
+                    .tools
+                    .dispatch(&tool_name, arguments)
+                    .instrument(tool_span)
+                    .await
+                {
                     Ok(result) => (result, false),
                     Err(error) => {
                         warn!(tool = %tool_name, err = %error, "tool dispatch error");
@@ -551,6 +569,7 @@ impl LegionLoop {
 
 #[async_trait]
 impl AgentLoopTrait for LegionLoop {
+    #[tracing::instrument(name = "agent.start", skip_all, fields(model = %config.model))]
     async fn start(&self, config: RunConfig) -> Result<RunId> {
         let run_id = Uuid::new_v4();
         self.store.create_session(run_id, &config).await?;
@@ -562,6 +581,7 @@ impl AgentLoopTrait for LegionLoop {
         Ok(run_id)
     }
 
+    #[tracing::instrument(name = "agent.recover", skip_all)]
     async fn recover(&self, run_id: RunId) -> Result<()> {
         let outcome = recover_session(self.store.as_ref(), run_id).await?;
         match outcome {
@@ -584,6 +604,7 @@ impl AgentLoopTrait for LegionLoop {
         Ok(())
     }
 
+    #[tracing::instrument(name = "agent.resume", skip_all)]
     async fn resume(&self, run_id: RunId, event: ExternalEvent) -> Result<()> {
         // Append the external event as a UserMessage (or other event type)
         match event {
@@ -642,6 +663,7 @@ impl AgentLoopTrait for LegionLoop {
         Ok(())
     }
 
+    #[tracing::instrument(name = "agent.resolve", skip_all)]
     async fn resolve(&self, run_id: RunId) -> Result<TurnEnvelope> {
         let log = self.store.read_log(run_id).await?;
         let config = Self::config_from_log(&log, run_id)?;

@@ -113,11 +113,11 @@ Checklist last reconciled with the implementation and test suite on 2026-08-31. 
   - [ ] Quiesce or use a database-consistent snapshot before restic capture; never copy live SQLite/Raft files blindly
   - [ ] Documented and automated restore procedure
   - [ ] Successful restore drill from a clean node, with state integrity verified
-- [ ] OpenTelemetry traces for agent loop steps
-- [ ] OpenTelemetry metrics export for token consumption
-  - [ ] Monotonic input, output, cache-read, and cache-write token counters where providers expose them
-  - [ ] Low-cardinality dimensions for provider, model, node, and outcome; never session IDs, run IDs, prompts, or user content
-  - [ ] OTLP configuration plus an integration test proving token usage reaches an OTEL collector
+- [x] OpenTelemetry traces for agent loop steps
+- [x] OpenTelemetry metrics export for token consumption
+  - [x] Monotonic input, output, cache-read, and cache-write token counters where providers expose them
+  - [x] Low-cardinality dimensions for provider, model, node, and outcome; never session IDs, run IDs, prompts, or user content
+  - [x] OTLP configuration plus an integration test proving token usage reaches an OTEL collector
 - [x] Built-in metrics endpoint: turn latency, token counts, function invocation times
 - [x] `legion session reconcile` — resolve `pending_reconciliation` sessions
 - [x] Rate limiting per session / per function

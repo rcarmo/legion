@@ -9,7 +9,7 @@ TARGET_WARN_GB ?= 10
 
 .PHONY: help preflight postflight space build release test lint fmt fmt-check check verify-m3 \
 	clean clean-junk distclean docs dev server integration-test cli-integration-test \
-	wasm-fixture wasm-integration-test install uninstall test-core test-store test-loop \
+	wasm-fixture wasm-integration-test otel-integration-test install uninstall test-core test-store test-loop \
 	test-namespace test-deploy test-cluster test-runtime-extism
 
 help:
@@ -126,6 +126,11 @@ wasm-fixture: preflight
 
 wasm-integration-test: server wasm-fixture
 	@./tests/integration/wasm_server_smoke.sh
+	@$(MAKE) --no-print-directory postflight
+
+otel-integration-test: preflight
+	$(CARGO) build -p legion-server --bin otel-probe
+	@./tests/integration/otel_collector_smoke.sh
 	@$(MAKE) --no-print-directory postflight
 
 docs: preflight

@@ -37,6 +37,10 @@ anyhow      = "1"
 # Tracing
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+opentelemetry       = "0.31"
+opentelemetry_sdk   = { version = "0.31", features = ["rt-tokio"] }
+opentelemetry-otlp  = { version = "0.31", default-features = false, features = ["http-proto", "reqwest-blocking-client", "trace", "metrics", "internal-logs"] }
+tracing-opentelemetry = "0.32"
 
 # LLM
 rs-ai = { path = "../../rs-ai", default-features = false }

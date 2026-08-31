@@ -18,3 +18,4 @@ uuid        = { workspace = true }
 chrono      = { workspace = true }
 futures     = { workspace = true }
 tracing     = { workspace = true }
+opentelemetry = { workspace = true }

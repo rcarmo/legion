@@ -6,12 +6,14 @@ mod cli;
 mod config;
 mod namespace_resources;
 mod rate_limit;
+mod telemetry;
 mod tools;
 
 use anyhow::{Context, Result};
 use clap::Parser;
 use std::sync::Arc;
 use tracing::{info, warn};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use legion_cluster::{
     BootstrapOutcome, NinePClient, RaftAdvertisement, bootstrap::run_bootstrap_with_raft,
@@ -61,14 +63,6 @@ where
 }
 
 async fn run_server() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "legion=info,warn".parse().unwrap()),
-        )
-        .compact()
-        .init();
-
     // ── Config ───────────────────────────────────────────────────────────────
     let explicit_config = std::env::var("LEGION_CONFIG").ok();
     let config_path = explicit_config.as_deref().unwrap_or("legion.toml");
@@ -133,6 +127,20 @@ async fn run_server() -> Result<()> {
 
     // ── Cluster node ─────────────────────────────────────────────────────────
     let node = Arc::new(ClusterNode::start(cfg.cluster.clone()).await?);
+    let telemetry = telemetry::TelemetryProviders::init("legion-server", node.short_id())?;
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "legion=info,warn".parse().unwrap());
+    let otel_layer = telemetry
+        .as_ref()
+        .map(|providers| tracing_opentelemetry::layer().with_tracer(providers.tracer.clone()));
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer().compact())
+        .with(otel_layer)
+        .init();
+    if telemetry.is_some() {
+        info!("OTLP trace and metric export enabled");
+    }
     info!(node_id = %node.endpoint_id(), "cluster node ready");
     let _mdns_discovery = if cfg.cluster.mdns {
         Some(legion_cluster::discovery::MdnsDiscovery::start(&node).await?)
