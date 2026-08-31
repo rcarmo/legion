@@ -2,9 +2,12 @@
   "name": "@legion/client",
   "version": "0.1.0",
   "type": "module",
-  "exports": "./src/index.ts",
-  "types": "./src/index.ts",
+  "exports": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "engines": { "node": ">=20", "bun": ">=1.1" },
-  "files": ["src", "README.md"],
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target node --format esm && bun x tsc src/index.ts --declaration --emitDeclarationOnly --outDir dist --target ES2022 --module NodeNext --moduleResolution NodeNext --strict --skipLibCheck"
+  },
   "license": "MIT"
 }

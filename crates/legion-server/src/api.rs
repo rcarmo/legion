@@ -15,7 +15,7 @@ use axum::{
     extract::{Path, State},
     http::{header, HeaderValue, StatusCode},
     middleware,
-    response::{IntoResponse, Json, Sse, sse::Event as SseEvent},
+    response::{Html, IntoResponse, Json, Sse, sse::Event as SseEvent},
     routing::{get, post},
     Router,
 };
@@ -134,6 +134,10 @@ struct RunAgentRequest {
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
+
+async fn dashboard() -> Html<&'static str> {
+    Html(include_str!("../static/dashboard.html"))
+}
 
 async fn health() -> Json<Value> {
     Json(json!({ "ok": true, "version": env!("CARGO_PKG_VERSION") }))
@@ -720,6 +724,8 @@ pub async fn serve(state: Arc<AppState>, addr: String, api_key: Option<String>) 
     use crate::auth::require_api_key;
 
     let app = Router::new()
+        .route("/",                               get(dashboard))
+        .route("/dashboard",                      get(dashboard))
         .route("/health",                          get(health))
         .route("/metrics",                         get(metrics))
         .route("/cluster/peers",                   get(cluster_peers))

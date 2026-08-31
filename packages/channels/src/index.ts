@@ -32,8 +32,9 @@ export class LegionChannelRouter {
   async handle(adapter: ChannelAdapter, message: ChannelMessage): Promise<void> {
     const key = this.options.key?.(message) ?? `${message.channel}:${message.chatId}`;
     let session = this.sessions.get(key);
-    if (!session) {
-      session = (await this.options.client.createSession(this.options.session)).id;
+    if (session === undefined) {
+      const created = await this.options.client.createSession(this.options.session);
+      session = created.id;
       this.sessions.set(key, session);
     }
     const response = await this.options.client.sendMessage(session, message.text);

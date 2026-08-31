@@ -21,8 +21,9 @@ pub async fn require_api_key(
     req:  Request<Body>,
     next: Next,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    // Health endpoint is always public
-    if req.uri().path() == "/health" {
+    // Health and the dashboard shell are public; dashboard API calls still
+    // require the configured key, entered and stored locally by the browser.
+    if matches!(req.uri().path(), "/health" | "/" | "/dashboard") {
         return Ok(next.run(req).await);
     }
 

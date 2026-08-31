@@ -9,7 +9,7 @@ TARGET_WARN_GB ?= 10
 
 .PHONY: help preflight postflight space build release test lint fmt fmt-check check verify-m3 \
 	clean clean-junk distclean docs dev server integration-test cli-integration-test \
-	wasm-fixture wasm-integration-test otel-integration-test backup-restore-drill bun-ninep-integration-test js-test load-test load-test-http load-test-hiqlite server-release install uninstall test-core test-store test-loop \
+	wasm-fixture wasm-integration-test otel-integration-test backup-restore-drill bun-ninep-integration-test dashboard-integration-test js-test load-test load-test-http load-test-hiqlite server-release install uninstall test-core test-store test-loop \
 	test-namespace test-deploy test-cluster test-ecosystem test-runtime-extism
 
 help:
@@ -140,11 +140,17 @@ otel-integration-test: preflight
 
 js-test:
 	bun install --frozen-lockfile
+	bun run build:client
 	bun run typecheck
+	bun -e 'import("./packages/client/dist/index.js").then(m => { if (typeof m.LegionClient !== "function") process.exit(1) })'
 	bun test packages
 
 bun-ninep-integration-test: server js-test
 	@./tests/integration/bun_ninep_smoke.sh
+	@$(MAKE) --no-print-directory postflight
+
+dashboard-integration-test: server js-test
+	@./tests/integration/dashboard_smoke.sh
 	@$(MAKE) --no-print-directory postflight
 
 backup-restore-drill: clean-junk

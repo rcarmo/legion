@@ -4,10 +4,12 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "test": "bun test packages",
-    "typecheck": "bun x tsc -p tsconfig.json --noEmit"
+    "typecheck": "bun x tsc -p tsconfig.json --noEmit",
+    "build:client": "bun run --cwd packages/client build"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "playwright": "1.60.0",
     "typescript": "^5.9.0"
   }
 }

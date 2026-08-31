@@ -1,5 +1,7 @@
 # Legion
 
+![Legion icon](docs/icon-256.png)
+
 > A self-hosted, self-healing durable functions platform with Raft consensus, content-addressed storage, and a 9P namespace — running AI agents and WASM/Bun functions across a LAN-bootstrapped P2P cluster.
 
 Legion is the open, self-hostable equivalent of Cloudflare Agents / Durable Objects, built entirely in Rust. Consider it a learning experience in various ways, informed by my interest in Plan9, general concerns about doing lifecycle management The Right Way<sup>TM</sup>, and wanting something I could run locally across Intel and ARM machines (often very low powered SBCs).
@@ -60,6 +62,7 @@ After a few weeks of pondering, this is what I came up with, and substantiated i
 | `legion-cluster` | iroh endpoint, mDNS discovery, Raft bootstrap |
 | `legion-runtime` | WASM (wasmtime/extism) and Bun function executors |
 | `legion-deploy` | CAS function deployment CLI and server handler |
+| `legion-ecosystem` | Agent tools, supervised child runs, and workflow DAG execution |
 | `legion-server` | Top-level binary wiring all crates together |
 
 ## Key Dependencies
@@ -95,3 +98,4 @@ Early design stage. See [docs/10-roadmap.md](docs/10-roadmap.md) for milestone p
 - [08 — Function Runtime](docs/08-runtime.md)
 - [09 — Getting Started](docs/09-getting-started.md)
 - [10 — Roadmap](docs/10-roadmap.md)
+- [14 — Agent Ecosystem](docs/14-agent-ecosystem.md)

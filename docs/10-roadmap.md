@@ -130,13 +130,13 @@ Checklist last reconciled with the implementation and test suite on 2026-08-31. 
 
 **Goal**: Multi-agent workflows, agent-as-tool composition, picoclaw channel adapters.
 
-- [ ] Agents callable as tools (function registration of agent sessions)
-- [ ] picoclaw-compatible channel adapters (Telegram, web chat)
-- [ ] Sub-agent sessions (fork + supervised child runs)
-- [ ] Workflow graph execution (inspired by salvor's `run_graph`)
-- [ ] `@legion/client` npm package for Bun/Node.js
-- [ ] Dashboard UI (hiqlite's built-in dashboard extended with session view)
-- [ ] `legion-bun-client`: TypeScript 9P adapter for Bun functions
+- [x] Agents callable as tools (`AgentProfile` registration exposes `agent.<name>` through the shared `ToolRegistry`)
+- [x] picoclaw-compatible channel adapters (Telegram long polling, framework-neutral web chat, durable conversation routing)
+- [x] Sub-agent sessions (verified parent sequence, durable fork, assignment injection, supervised child result/status)
+- [x] Workflow graph execution (validated DAG, dependency outputs, concurrent deterministic waves, cycle rejection)
+- [x] `@legion/client` npm package for Bun/Node.js (Node-targeted ESM plus declarations, authenticated REST contracts)
+- [x] Dashboard UI (embedded session list/detail/log plus agents, functions, cluster and workflow views)
+- [x] `legion-bun-client`: TypeScript 9P adapter for Bun functions (native 9P2000.L over opt-in loopback TCP, capability authenticated)
 
 ---
 
