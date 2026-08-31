@@ -245,6 +245,7 @@ impl BuiltinToolRegistry {
             parameters:  params,
             description: description.clone(),
             idempotent:  args.get("idempotent").and_then(|v| v.as_bool()).unwrap_or(false),
+            env:         Default::default(),
         };
 
         let manifest_json = serde_json::to_value(&manifest)

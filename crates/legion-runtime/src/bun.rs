@@ -54,13 +54,20 @@ impl Invoker for BunRuntime {
         debug!(fn_name = %req.function_name, "invoking bun function");
         let start = Instant::now();
 
-        let mut child = Command::new(&self.bun_bin)
+        let mut command = Command::new(&self.bun_bin);
+        command
             .arg("run")
             .arg(&script)
+            .env_clear()
+            .envs(base_environment())
+            .envs(&req.env)
+            .env("LEGION_FUNCTION_NAME", &req.function_name)
+            .env("LEGION_CALL_ID", &req.call_id)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
+            .kill_on_drop(true);
+        let mut child = command
             .spawn()
             .map_err(|e| LegionError::ToolError(format!("spawn bun: {e}")))?;
 
@@ -99,6 +106,12 @@ impl Invoker for BunRuntime {
     }
 }
 
+fn base_environment() -> impl Iterator<Item = (String, String)> {
+    ["PATH", "HOME", "TMPDIR", "LANG", "TZ"]
+        .into_iter()
+        .filter_map(|name| std::env::var(name).ok().map(|value| (name.into(), value)))
+}
+
 fn which_bun() -> PathBuf {
     if let Ok(path) = std::env::var("LEGION_BUN_BIN") {
         return PathBuf::from(path);
@@ -111,4 +124,39 @@ fn which_bun() -> PathBuf {
         }
     }
     PathBuf::from("bun") // rely on PATH
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn injects_declared_and_legion_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let fn_dir = dir.path().join("fn/hello");
+        std::fs::create_dir_all(&fn_dir).unwrap();
+        std::fs::write(fn_dir.join("index.ts"), "unused").unwrap();
+        let runner = dir.path().join("fake-bun");
+        std::fs::write(
+            &runner,
+            "#!/bin/sh\nprintf '{\"declared\":\"%s\",\"name\":\"%s\",\"call\":\"%s\"}\\n' \"$GREETING\" \"$LEGION_FUNCTION_NAME\" \"$LEGION_CALL_ID\"\n",
+        ).unwrap();
+        std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let runtime = BunRuntime { fn_root: dir.path().join("fn"), bun_bin: runner };
+        let result = runtime.invoke(InvokeRequest {
+            function_name: "hello".into(),
+            call_id: "call-1".into(),
+            artifact_cid: None,
+            env: BTreeMap::from([("GREETING".into(), "hello".into())]),
+            args: serde_json::json!({}),
+        }).await.unwrap();
+        assert_eq!(result.output, serde_json::json!({
+            "declared": "hello",
+            "name": "hello",
+            "call": "call-1",
+        }));
+    }
 }

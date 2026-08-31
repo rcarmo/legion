@@ -117,6 +117,7 @@ impl ToolRegistry for RegistryBridge {
                 function_name: function_name.to_string(),
                 call_id: uuid::Uuid::new_v4().to_string(),
                 artifact_cid: None,
+                env: manifest.env,
                 args,
             })
             .await?;
@@ -157,6 +158,7 @@ mod tests {
             parameters: serde_json::json!({ "type": "object" }),
             description: format!("{name} test function"),
             idempotent: false,
+            env: Default::default(),
         };
         namespace
             .set_json(

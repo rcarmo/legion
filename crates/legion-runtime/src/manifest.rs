@@ -1,5 +1,7 @@
 //! Function manifest — the descriptor stored at `/fn/<name>/manifest.json`.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Which execution engine a function requires.
@@ -33,4 +35,7 @@ pub struct FunctionManifest {
     /// Whether the function produces side effects.
     #[serde(default)]
     pub idempotent:   bool,
+    /// Explicit environment variables injected into Bun subprocesses.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env:          BTreeMap<String, String>,
 }

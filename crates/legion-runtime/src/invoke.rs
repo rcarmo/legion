@@ -1,5 +1,7 @@
 //! Invoke request/result types and the `Invoker` trait.
 
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
 use serde_json::Value;
 
@@ -12,6 +14,8 @@ pub struct InvokeRequest {
     pub call_id:       String,
     /// Optional CAS artifact override selected by weighted routing.
     pub artifact_cid:  Option<String>,
+    /// Explicit environment variables supplied by the deployment manifest.
+    pub env:           BTreeMap<String, String>,
     pub args:          Value,
 }
 

@@ -81,6 +81,8 @@ struct DeployRequest {
     wasm_b64:    Option<String>,
     idempotent:  Option<bool>,
     parameters:  Option<serde_json::Value>,
+    #[serde(default)]
+    env:         BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -91,6 +93,8 @@ struct RegisterRequest {
     description: Option<String>,
     idempotent:  Option<bool>,
     parameters:  Option<serde_json::Value>,
+    #[serde(default)]
+    env:         BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -336,6 +340,7 @@ async fn deploy_function(
     }
     if let Some(p) = req.parameters { job.parameters = p; }
     if let Some(i) = req.idempotent  { job.idempotent = i; }
+    job.env = req.env;
 
     let outcome = state.deployer.deploy(job).await;
     if outcome.status == legion_deploy::DeployStatus::Success {
@@ -364,6 +369,7 @@ async fn register_function(
     );
     if let Some(parameters) = req.parameters { job.parameters = parameters; }
     if let Some(idempotent) = req.idempotent { job.idempotent = idempotent; }
+    job.env = req.env;
     let outcome = state.deployer.register(job, &req.artifact_cid).await;
     if outcome.status == legion_deploy::DeployStatus::Success {
         Ok((StatusCode::CREATED, Json(serde_json::to_value(&outcome).unwrap())))
@@ -532,6 +538,13 @@ async fn invoke_function(
         function_name: name.clone(),
         call_id,
         artifact_cid,
+        env: if let legion_namespace::NodeKind::Json(value) = manifest.kind {
+            serde_json::from_value::<legion_runtime::FunctionManifest>(value)
+                .map(|manifest| manifest.env)
+                .unwrap_or_default()
+        } else {
+            BTreeMap::new()
+        },
         args,
     };
     let result = match runtime {

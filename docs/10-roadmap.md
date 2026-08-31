@@ -83,7 +83,7 @@ Checklist last reconciled with the implementation and test suite on 2026-08-31. 
 - [x] `legion-deploy`: CAS deployment (artifacts are stored by BLAKE3 CID and materialized locally for execution)
   - [x] iroh-blobs integration
   - [x] `push`, `register`, `route`, `promote` commands
-  - [ ] Canary weighted routing
+  - [x] Canary weighted routing
 - [ ] `legion-runtime`: WASM executor
   - [x] wasmtime + extism integration
   - [ ] Host functions (log, read, write, budget)
@@ -93,7 +93,7 @@ Checklist last reconciled with the implementation and test suite on 2026-08-31. 
 - [ ] `legion-runtime`: Bun executor
   - [x] Subprocess spawn + stdio protocol
   - [x] Timeout + process termination
-  - [ ] Environment variable injection
+  - [x] Environment variable injection
 - [x] CLI: `legion deploy`
 - [x] Integration tests: deploy and invoke WASM and Bun functions
 

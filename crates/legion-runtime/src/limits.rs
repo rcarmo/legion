@@ -282,6 +282,7 @@ mod tests {
             function_name: "test".into(),
             call_id: "call".into(),
             artifact_cid: None,
+            env: Default::default(),
             args,
         }
     }

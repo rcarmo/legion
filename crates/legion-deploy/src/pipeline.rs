@@ -81,6 +81,7 @@ impl DeployPipeline {
             parameters:  job.parameters.clone(),
             description: job.description.clone(),
             idempotent:  job.idempotent,
+            env:         job.env.clone(),
         };
 
         match serde_json::to_value(&manifest) {

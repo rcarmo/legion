@@ -1,5 +1,7 @@
 //! Deploy job types.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use legion_runtime::manifest::FunctionRuntime;
@@ -19,6 +21,9 @@ pub struct DeployJob {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wasm_bytes:  Option<Vec<u8>>,
     pub idempotent:  bool,
+    /// Explicit environment variables passed to Bun functions.
+    #[serde(default)]
+    pub env:         BTreeMap<String, String>,
     pub submitted_at: i64,
 }
 
@@ -38,6 +43,7 @@ impl DeployJob {
             code:        code.into(),
             wasm_bytes:  None,
             idempotent:  false,
+            env:         BTreeMap::new(),
             submitted_at: chrono::Utc::now().timestamp_millis(),
         }
     }

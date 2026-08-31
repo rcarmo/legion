@@ -129,6 +129,9 @@ pub struct DeployArgs {
     pub schema: Option<PathBuf>,
     #[arg(long)]
     pub idempotent: bool,
+    /// Environment variable in KEY=VALUE form; may be repeated.
+    #[arg(long = "env", value_parser = parse_env)]
+    pub env: Vec<(String, String)>,
 }
 
 #[derive(Debug, Args)]
@@ -143,6 +146,9 @@ pub struct RegisterArgs {
     pub schema: Option<PathBuf>,
     #[arg(long)]
     pub idempotent: bool,
+    /// Environment variable in KEY=VALUE form; may be repeated.
+    #[arg(long = "env", value_parser = parse_env)]
+    pub env: Vec<(String, String)>,
 }
 
 #[derive(Debug, Args)]
@@ -263,6 +269,7 @@ async fn run_deploy(client: &ApiClient, command: &DeployCommand) -> Result<()> {
                 "description": args.description,
                 "parameters": parameters,
                 "idempotent": args.idempotent,
+                "env": args.env.iter().cloned().collect::<std::collections::BTreeMap<_, _>>(),
             }))).await?);
         }
         DeployCommand::Route(args) => {
@@ -292,6 +299,7 @@ async fn run_deploy(client: &ApiClient, command: &DeployCommand) -> Result<()> {
                 "description": args.description,
                 "parameters": parameters,
                 "idempotent": args.idempotent,
+                "env": args.env.iter().cloned().collect::<std::collections::BTreeMap<_, _>>(),
             });
             match args.runtime {
                 RuntimeArg::Bun => {
@@ -308,6 +316,20 @@ async fn run_deploy(client: &ApiClient, command: &DeployCommand) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn parse_env(value: &str) -> Result<(String, String), String> {
+    let (name, value) = value
+        .split_once('=')
+        .ok_or_else(|| "environment variables must use KEY=VALUE".to_string())?;
+    if name.is_empty()
+        || !name.chars().enumerate().all(|(index, ch)| {
+            ch == '_' || ch.is_ascii_alphabetic() || (index > 0 && ch.is_ascii_digit())
+        })
+    {
+        return Err("environment variable name must match [A-Za-z_][A-Za-z0-9_]*".into());
+    }
+    Ok((name.into(), value.into()))
 }
 
 fn read_schema(path: Option<&PathBuf>) -> Result<Value> {
