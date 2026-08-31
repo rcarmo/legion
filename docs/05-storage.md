@@ -34,7 +34,7 @@ hiqlite wraps `rusqlite` with `openraft` to provide a strongly-consistent, highl
 |---|---|
 | `sqlite` | Core turn and session storage |
 | `auto-heal` | Automatic log catch-up after node rejoin |
-| `backup` | Encrypted S3 backup of the SQLite state machine snapshot |
+| `backup` | Encrypted off-cluster snapshot transport for the SQLite state machine; hiqlite currently targets S3-compatible object storage |
 | `dlock` | Distributed lock for leader-only operations (e.g. function promotion) |
 | `listen_notify_local` | Wake parked sessions on turn completion |
 | `migrations` | Schema evolution via numbered SQL files |
@@ -140,9 +140,9 @@ This means: push a function blob to any one node → all nodes can serve it to a
 | hiqlite peers | Empty (single-node mode) | 3 addresses from mDNS |
 | fjall | Local directory | Local directory (each node) |
 | iroh-blobs | Local store | Distributed across all peers |
-| S3 backup | Disabled | Optional (hiqlite backup feature) |
+| Off-cluster backup | Disabled | Required, encrypted and restore-tested; hiqlite's S3-compatible transport is the initial implementation |
 
-The application code is identical — only configuration changes.
+The application code is identical — only configuration changes. “S3-compatible” describes the initial transport, not the durability requirement: production readiness requires recoverable copies outside the Legion cluster and a regularly verified clean-node restore procedure.
 
 ---
 

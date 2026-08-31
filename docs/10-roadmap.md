@@ -107,7 +107,10 @@ Checklist last reconciled with the implementation and test suite on 2026-08-31. 
 
 - [x] Authenticated encryption for iroh connections (built into iroh QUIC endpoints)
 - [ ] Authentication for namespace access (capability tokens; REST API-key authentication exists)
-- [ ] hiqlite S3 backup integration
+- [ ] Off-cluster, restorable backups
+  - [ ] Automated encrypted state snapshots to storage outside the Legion cluster (initially via hiqlite's S3-compatible backup transport)
+  - [ ] Documented and automated restore procedure
+  - [ ] Successful restore drill from a clean node, with state integrity verified
 - [ ] OpenTelemetry traces for agent loop steps
 - [x] Metrics: turn latency, token counts, function invocation times
 - [x] `legion session reconcile` — resolve `pending_reconciliation` sessions
@@ -152,5 +155,5 @@ Checklist last reconciled with the implementation and test suite on 2026-08-31. 
 | jetstream "not production-ready" | Pin version; contribute upstream or fork if needed |
 | openraft alpha version label | Deployed in production at Databend; label is cosmetic |
 | Bun subprocess overhead | ~50-200ms cold start; mitigate with warm pool (future milestone) |
-| fjall/hiqlite storage format stability | Pin versions; test upgrades; S3 backup for recovery |
+| fjall/hiqlite storage format stability | Pin versions, test upgrades, and maintain restore-tested off-cluster backups (initially through hiqlite's S3-compatible transport) |
 | rs-ai tracking upstream pi-ai | We own both; coordinate breaking changes explicitly |
