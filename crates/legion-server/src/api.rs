@@ -27,6 +27,7 @@ use uuid::Uuid;
 use legion_core::traits::{AgentLoopTrait, EventStore};
 use legion_core::types::{Budget, ExternalEvent, RunConfig, SessionFilter};
 use legion_deploy::{DeployJob, DeployPipeline};
+use legion_ecosystem::{AgentProfile, AgentToolRegistry, Workflow, WorkflowRunner};
 use legion_loop::driver::{LegionLoop, ReconcileAction};
 use legion_namespace::Namespace;
 use legion_runtime::{
@@ -43,6 +44,8 @@ use crate::rate_limit::SessionRateLimiter;
 pub struct AppState {
     pub store:     Arc<dyn EventStore>,
     pub lp:        Arc<LegionLoop>,
+    pub agents:    Arc<AgentToolRegistry>,
+    pub workflows: Arc<WorkflowRunner>,
     pub deployer:  Arc<DeployPipeline>,
     pub namespace:   Namespace,
     pub invoker_bun:  Arc<dyn Invoker>,
@@ -121,6 +124,13 @@ struct SendMessageRequest {
 #[derive(Debug, Deserialize)]
 struct ReconcileRequest {
     action: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RunAgentRequest {
+    prompt: String,
+    parent_run_id: Option<Uuid>,
+    at_seq: Option<u64>,
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -240,6 +250,56 @@ async fn create_session(
         "id":     run_id.to_string(),
         "status": "idle",
     }))))
+}
+
+async fn list_agents(State(state): State<Arc<AppState>>) -> Json<Value> {
+    Json(json!({ "agents": state.agents.profiles().await }))
+}
+
+async fn register_agent(
+    State(state): State<Arc<AppState>>,
+    Json(profile): Json<AgentProfile>,
+) -> Result<(StatusCode, Json<Value>), (StatusCode, Json<Value>)> {
+    state.agents.register(profile.clone()).await
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(json!({ "error": error.to_string() }))))?;
+    Ok((StatusCode::CREATED, Json(json!({ "agent": profile }))))
+}
+
+async fn delete_agent(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if state.agents.unregister(&name).await {
+        Ok(Json(json!({ "name": name, "deleted": true })))
+    } else {
+        Err(not_found(format!("agent not found: {name}")))
+    }
+}
+
+async fn run_agent(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Json(request): Json<RunAgentRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let parent = match (request.parent_run_id, request.at_seq) {
+        (Some(run_id), Some(at_seq)) => Some((run_id, at_seq)),
+        (None, None) => None,
+        _ => return Err((StatusCode::BAD_REQUEST, Json(json!({
+            "error": "parent_run_id and at_seq must be supplied together"
+        })))),
+    };
+    let result = state.agents.run(&name, request.prompt, parent).await
+        .map_err(|error| server_error(error.to_string()))?;
+    Ok(Json(serde_json::to_value(result).map_err(|error| server_error(error.to_string()))?))
+}
+
+async fn run_workflow(
+    State(state): State<Arc<AppState>>,
+    Json(workflow): Json<Workflow>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let result = state.workflows.run(workflow).await
+        .map_err(|error| (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": error.to_string() }))))?;
+    Ok(Json(serde_json::to_value(result).map_err(|error| server_error(error.to_string()))?))
 }
 
 async fn get_session(
@@ -664,6 +724,10 @@ pub async fn serve(state: Arc<AppState>, addr: String, api_key: Option<String>) 
         .route("/metrics",                         get(metrics))
         .route("/cluster/peers",                   get(cluster_peers))
         .route("/sessions",                        get(list_sessions).post(create_session))
+        .route("/agents",                          get(list_agents).post(register_agent))
+        .route("/agents/{name}",                   axum::routing::delete(delete_agent))
+        .route("/agents/{name}/invoke",            post(run_agent))
+        .route("/workflows/run",                   post(run_workflow))
         .route("/sessions/{id}",                   get(get_session))
         .route("/sessions/{id}/log",               get(get_log))
         .route("/sessions/{id}/messages",          post(send_message))

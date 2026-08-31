@@ -10,7 +10,7 @@ TARGET_WARN_GB ?= 10
 .PHONY: help preflight postflight space build release test lint fmt fmt-check check verify-m3 \
 	clean clean-junk distclean docs dev server integration-test cli-integration-test \
 	wasm-fixture wasm-integration-test otel-integration-test backup-restore-drill load-test load-test-http load-test-hiqlite server-release install uninstall test-core test-store test-loop \
-	test-namespace test-deploy test-cluster test-runtime-extism
+	test-namespace test-deploy test-cluster test-ecosystem test-runtime-extism
 
 help:
 	@printf '%s\n' \
@@ -107,11 +107,12 @@ dev: preflight
 	RUST_LOG=legion=debug,hiqlite=info $(CARGO) run -p legion-server
 
 # Targeted tests.
-test-core test-store test-loop test-namespace test-deploy test-cluster test-runtime-extism: preflight
+test-core test-store test-loop test-namespace test-deploy test-cluster test-ecosystem test-runtime-extism: preflight
 	@case "$@" in \
 	 test-core) package=legion-core;; test-store) package=legion-store;; \
 	 test-loop) package=legion-loop;; test-namespace) package=legion-namespace;; \
 	 test-deploy) package=legion-deploy;; test-cluster) package=legion-cluster;; \
+	 test-ecosystem) package=legion-ecosystem;; \
 	 test-runtime-extism) package='legion-runtime --features extism';; esac; \
 	 threads=''; [[ "$@" == test-cluster ]] && threads='-- --test-threads=1'; \
 	 $(CARGO) test -p $$package $$threads

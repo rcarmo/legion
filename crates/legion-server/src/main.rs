@@ -21,6 +21,7 @@ use legion_cluster::{
 };
 use legion_core::ChainRegistry;
 use legion_deploy::DeployPipeline;
+use legion_ecosystem::{AgentToolRegistry, WorkflowRunner};
 use legion_loop::driver::LegionLoop;
 use legion_namespace::{LegionNamespace, Namespace, SessionResources};
 #[cfg(feature = "wasm")]
@@ -345,13 +346,17 @@ async fn run_server() -> Result<()> {
         node.clone(),
         namespace.clone(),
     ));
+    let agents = Arc::new(AgentToolRegistry::new(arc_store.clone()));
     let tools = Arc::new(ChainRegistry::new(vec![
         builtins as Arc<dyn legion_core::traits::ToolRegistry>,
         bridge.clone() as Arc<dyn legion_core::traits::ToolRegistry>,
+        agents.clone() as Arc<dyn legion_core::traits::ToolRegistry>,
     ]));
+    let workflows = Arc::new(WorkflowRunner::new(tools.clone()));
 
     // ── Agent loop ────────────────────────────────────────────────────────────
     let lp = Arc::new(LegionLoop::new(arc_store.clone(), tools));
+    agents.bind(lp.clone()).await;
     info!("agent loop ready (model: {})", cfg.model.default_model);
 
     let deploy_resources = Arc::new(ServerDeployNamespace::new(
@@ -423,6 +428,8 @@ async fn run_server() -> Result<()> {
     let state = Arc::new(AppState {
         store: arc_store,
         lp,
+        agents,
+        workflows,
         deployer,
         namespace,
         invoker_bun: bun_runtime,

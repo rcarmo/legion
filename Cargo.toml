@@ -7,6 +7,7 @@ members = [
     "crates/legion-cluster",
     "crates/legion-runtime",
     "crates/legion-deploy",
+    "crates/legion-ecosystem",
     "crates/legion-server",
 ]
 resolver = "2"

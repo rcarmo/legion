@@ -21,6 +21,7 @@ legion-store   = { path = "../legion-store" }
 legion-loop    = { path = "../legion-loop" }
 legion-cluster   = { path = "../legion-cluster" }
 legion-deploy    = { path = "../legion-deploy" }
+legion-ecosystem = { path = "../legion-ecosystem" }
 legion-namespace = { path = "../legion-namespace" }
 legion-runtime   = { path = "../legion-runtime" }
 
