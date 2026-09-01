@@ -97,7 +97,7 @@ legion_raft_snapshots/    ← snapshot metadata
 
 ## iroh-blobs: Content-Addressed Storage
 
-iroh-blobs stores arbitrary binary content by its SHA-256 hash (CID). Content is immutable once stored.
+iroh-blobs stores arbitrary binary content by its BLAKE3 hash (CID). Content is immutable once stored.
 
 ### What goes in iroh-blobs
 
@@ -122,14 +122,9 @@ cid TEXT NOT NULL  -- always a CID; functions are always stored as blobs
 
 ### Blob distribution
 
-iroh-blobs transfers content peer-to-peer over iroh QUIC connections. When a node fetches a CID it does not have locally:
+The current deployment pipeline uses a node-local iroh-blobs `FsStore`. A node can read only the CIDs in its own store; Legion does not yet advertise providers or fetch missing blobs from peers.
 
-1. It queries the iroh DHT or gossip layer for peers that have the content
-2. It opens a direct QUIC connection to one of those peers
-3. It downloads and verifies the content (hash check)
-4. It caches locally for future requests
-
-This means: push a function blob to any one node → all nodes can serve it to any caller.
+Milestone 6 connects providers across cluster nodes. An executor will fetch a missing CID from a known provider, verify its BLAKE3 hash, and cache it before execution. See [15 — Distributed Execution](15-distributed-execution.md).
 
 ---
 
@@ -139,7 +134,7 @@ This means: push a function blob to any one node → all nodes can serve it to a
 |---|---|---|
 | hiqlite peers | Empty (single-node mode) | 3 addresses from mDNS |
 | fjall | Local directory | Local directory (each node) |
-| iroh-blobs | Local store | Distributed across all peers |
+| iroh-blobs | Local store | Local per-node store; peer transfer is Milestone 6 |
 | Off-cluster backup | Disabled | Required, encrypted and restore-tested; use hiqlite's native S3-compatible snapshots or a restic repository |
 
 The application code is identical — only configuration changes. Production readiness requires recoverable copies outside the Legion cluster and a regularly verified clean-node restore procedure, not a specific storage vendor.
