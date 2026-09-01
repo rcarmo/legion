@@ -98,4 +98,7 @@ Early design stage. See [docs/10-roadmap.md](docs/10-roadmap.md) for milestone p
 - [08 — Function Runtime](docs/08-runtime.md)
 - [09 — Getting Started](docs/09-getting-started.md)
 - [10 — Roadmap](docs/10-roadmap.md)
+- [11 — Built-in Agent Tools](docs/11-builtin-tools.md)
+- [12 — Backup and Restore](docs/12-backup-restore.md)
+- [13 — Load Testing](docs/13-load-testing.md)
 - [14 — Agent Ecosystem](docs/14-agent-ecosystem.md)
