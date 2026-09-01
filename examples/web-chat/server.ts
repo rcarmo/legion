@@ -11,6 +11,7 @@ export async function startWebChat(port = Number(process.env.PORT ?? 3001)) {
   await adapter.start(message => router.handle(adapter, message));
   const html = await Bun.file(new URL("./index.html", import.meta.url)).text();
   return Bun.serve<{ chatId: string }>({
+    hostname: process.env.HOST ?? "127.0.0.1",
     port,
     fetch(request, server) {
       if (new URL(request.url).pathname === "/ws") {
@@ -23,8 +24,15 @@ export async function startWebChat(port = Number(process.env.PORT ?? 3001)) {
       open(ws) { clients.set(ws.data.chatId, ws); },
       close(ws) { clients.delete(ws.data.chatId); },
       message(ws, raw) {
-        const value = JSON.parse(String(raw));
-        void adapter.receive({ id: crypto.randomUUID(), chatId: ws.data.chatId, senderId: ws.data.chatId, text: String(value.text ?? "") });
+        try {
+          const value = JSON.parse(String(raw));
+          const text = String(value.text ?? "").trim();
+          if (!text) return;
+          void adapter.receive({ id: crypto.randomUUID(), chatId: ws.data.chatId, senderId: ws.data.chatId, text })
+            .catch(error => ws.send(JSON.stringify({ error: error instanceof Error ? error.message : String(error) })));
+        } catch {
+          ws.send(JSON.stringify({ error: "invalid message" }));
+        }
       },
     },
   });

@@ -1,1 +1,36 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Legion Web Chat</title><style>body{font:16px system-ui;max-width:50rem;margin:2rem auto;padding:0 1rem;background:#0b1020;color:#eef}#log{min-height:20rem;border:1px solid #345;padding:1rem;white-space:pre-wrap}form{display:flex;margin-top:1rem}input{flex:1;padding:.8rem}button{padding:.8rem}</style></head><body><h1>Legion Web Chat</h1><div id="log"></div><form><input autofocus placeholder="Message"><button>Send</button></form><script>const log=document.querySelector('#log'),input=document.querySelector('input'),ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`);ws.onmessage=e=>{const m=JSON.parse(e.data);log.textContent+=`Legion: ${m.text}\n`};document.querySelector('form').onsubmit=e=>{e.preventDefault();if(!input.value)return;log.textContent+=`You: ${input.value}\n`;ws.send(JSON.stringify({text:input.value}));input.value=''}</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Legion Web Chat</title>
+  <style>
+    :root{color-scheme:dark;font:16px/1.5 system-ui,sans-serif;background:#090d18;color:#eef2ff}
+    *{box-sizing:border-box}body{margin:0;padding:1.25rem}.app{width:min(52rem,100%);margin:auto}
+    header{display:flex;align-items:center;justify-content:space-between;gap:1rem}h1{font-size:1.35rem;margin:.5rem 0}
+    #status{font-size:.85rem;color:#fbbf24}#status.online{color:#86efac}#status.error{color:#fca5a5}
+    #log{height:min(65vh,38rem);overflow:auto;border:1px solid #273451;border-radius:.75rem;padding:1rem;background:#0d1424}
+    .message{margin:.65rem 0;padding:.7rem .85rem;border-radius:.7rem;white-space:pre-wrap;overflow-wrap:anywhere}
+    .user{margin-left:12%;background:#1d4ed8}.legion{margin-right:12%;background:#1e293b}.error{background:#7f1d1d}
+    form{display:flex;gap:.6rem;margin-top:.8rem}input{flex:1;min-width:0;padding:.8rem;border:1px solid #334155;border-radius:.6rem;background:#111827;color:inherit}
+    button{padding:.8rem 1.1rem;border:0;border-radius:.6rem;background:#2563eb;color:white;font-weight:650;cursor:pointer}button:disabled,input:disabled{opacity:.55}
+    footer{margin-top:.65rem;color:#94a3b8;font-size:.8rem}
+  </style>
+</head>
+<body><main class="app">
+  <header><h1>Legion Web Chat</h1><span id="status">Connecting…</span></header>
+  <section id="log" aria-live="polite"></section>
+  <form><input autofocus autocomplete="off" placeholder="Message Legion…" disabled><button disabled>Send</button></form>
+  <footer>Each browser connection uses its own durable Legion session and a free OpenCode model.</footer>
+</main>
+<script>
+const log=document.querySelector('#log'),input=document.querySelector('input'),button=document.querySelector('button'),status=document.querySelector('#status');
+const add=(kind,text)=>{const item=document.createElement('div');item.className=`message ${kind}`;item.textContent=text;log.append(item);log.scrollTop=log.scrollHeight};
+const setStatus=(text,kind='')=>{status.textContent=text;status.className=kind};
+const ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`);
+ws.onopen=()=>{setStatus('Connected','online');input.disabled=button.disabled=false;input.focus()};
+ws.onclose=()=>{setStatus('Disconnected','error');input.disabled=button.disabled=true};
+ws.onerror=()=>setStatus('Connection error','error');
+ws.onmessage=e=>{const m=JSON.parse(e.data);add(m.error?'error':'legion',m.error?`Error: ${m.error}`:m.text)};
+document.querySelector('form').onsubmit=e=>{e.preventDefault();const text=input.value.trim();if(!text||ws.readyState!==WebSocket.OPEN)return;add('user',text);ws.send(JSON.stringify({text}));input.value=''};
+</script></body></html>
