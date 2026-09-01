@@ -149,7 +149,7 @@ impl LegionNamespace {
     }
 
     async fn exists(&self, path: &str) -> bool {
-        if path == "/peers" {
+        if path == "/peers" || is_virtual_dir(path) {
             return true;
         }
         if let Some((peer, _)) = Self::peer_path(path) {
@@ -165,7 +165,7 @@ impl LegionNamespace {
     }
 
     async fn is_dir(&self, path: &str) -> bool {
-        if path == "/peers" {
+        if path == "/peers" || is_virtual_dir(path) {
             return true;
         }
         match self.target(path).await {
@@ -416,6 +416,11 @@ fn function_metadata_path(path: &str) -> Option<(&str, &str)> {
     }
 }
 
+fn is_virtual_dir(path: &str) -> bool {
+    let parts = path.trim_matches('/').split('/').collect::<Vec<_>>();
+    matches!(parts.as_slice(), ["sessions", run_id] if run_id.parse::<legion_core::types::RunId>().is_ok())
+}
+
 fn is_virtual_path(path: &str) -> bool {
     let parts = path.trim_matches('/').split('/').collect::<Vec<_>>();
     matches!(
@@ -482,7 +487,9 @@ impl NineP200L for LegionNamespace {
                     .unwrap_or_else(|| "/".into()),
                 name => join_path(&path, name),
             };
-            if !self.exists(&path).await {
+            let exists = self.exists(&path).await;
+            tracing::debug!(%path, exists, "9P walk component");
+            if !exists {
                 break;
             }
             qids.push(self.qid(&path).await);

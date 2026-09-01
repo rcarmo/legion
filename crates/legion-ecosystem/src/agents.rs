@@ -144,11 +144,15 @@ impl ToolRegistry for AgentToolRegistry {
         let profile = name
             .strip_prefix("agent.")
             .ok_or_else(|| LegionError::ToolNotFound(name.into()))?;
-        let prompt = args
+        let mut prompt = args
             .get("prompt")
             .and_then(Value::as_str)
             .ok_or_else(|| LegionError::ToolError("prompt is required".into()))?
             .to_string();
+        if let Some(dependencies) = args.get("dependencies") {
+            prompt.push_str("\n\nDependency outputs:\n");
+            prompt.push_str(&serde_json::to_string_pretty(dependencies)?);
+        }
         let parent = match args.get("parent_run_id") {
             Some(value) => {
                 let parent_run_id = value
@@ -267,6 +271,29 @@ mod tests {
             .unwrap();
         assert_eq!(value["output"]["content"], "done");
         assert_eq!(value["status"]["status"], "completed");
+    }
+
+    #[tokio::test]
+    async fn workflow_dependencies_are_injected_into_the_assignment() {
+        let store = Arc::new(MemoryEventStore::new());
+        let registry = AgentToolRegistry::new(store.clone());
+        registry.register(profile()).await.unwrap();
+        registry
+            .bind(Arc::new(StubLoop {
+                store: store.clone(),
+                starts: Mutex::new(0),
+            }))
+            .await;
+        let value = registry.dispatch(
+            "agent.researcher",
+            json!({"prompt":"review", "dependencies":{"source":{"content":"evidence"}}}),
+        ).await.unwrap();
+        let run_id: RunId = serde_json::from_value(value["run_id"].clone()).unwrap();
+        let log = store.read_log(run_id).await.unwrap();
+        assert_eq!(
+            log[1].event.payload.as_ref().unwrap()["content"],
+            "review\n\nDependency outputs:\n{\n  \"source\": {\n    \"content\": \"evidence\"\n  }\n}"
+        );
     }
 
     #[tokio::test]

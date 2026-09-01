@@ -308,6 +308,9 @@ mod tests {
                     .await
                     .map(|run_id| run_id.to_string().into_bytes()));
             }
+            if path.ends_with("/status") && self.0.lock().await.is_some() {
+                return Ok(Some(br#"{"status":"idle"}"#.to_vec()));
+            }
             Ok(None)
         }
 
@@ -399,6 +402,12 @@ mod tests {
         assert_eq!(
             String::from_utf8(remote.read_path("/sessions/new").await.unwrap()).unwrap(),
             run_id
+        );
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(
+                &remote.read_path(&format!("/sessions/{run_id}/status")).await.unwrap()
+            ).unwrap(),
+            json!({"status": "idle"})
         );
     }
 

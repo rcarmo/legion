@@ -25,7 +25,10 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use legion_core::traits::{AgentLoopTrait, EventStore};
-use legion_core::types::{Budget, ExternalEvent, RunConfig, SessionFilter};
+use legion_core::types::{
+    Budget, ExternalEvent, ParkReason, RunConfig, SessionFilter, SessionStatus, TurnEvent,
+    TurnEventKind,
+};
 use legion_deploy::{DeployJob, DeployPipeline};
 use legion_ecosystem::{AgentProfile, AgentToolRegistry, Workflow, WorkflowRunner};
 use legion_loop::driver::{LegionLoop, ReconcileAction};
@@ -124,6 +127,11 @@ struct SendMessageRequest {
 #[derive(Debug, Deserialize)]
 struct ReconcileRequest {
     action: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ParkSessionRequest {
+    description: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -320,6 +328,27 @@ async fn get_session(
     })))
 }
 
+async fn park_session(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+    Json(request): Json<ParkSessionRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    state.store.session_status(id).await.map_err(|error| not_found(error.to_string()))?;
+    let reason = ParkReason::AwaitingApproval { description: request.description };
+    state.store.append(id, TurnEvent {
+        kind: TurnEventKind::SessionParked { reason: reason.clone() },
+        payload: None,
+        payload_cid: None,
+        model: None,
+        tokens_in: None,
+        tokens_out: None,
+        wall_ms: None,
+    }).await.map_err(|error| server_error(error.to_string()))?;
+    state.store.set_status(id, SessionStatus::Parked { reason: reason.clone() }).await
+        .map_err(|error| server_error(error.to_string()))?;
+    Ok(Json(json!({ "id": id, "status": SessionStatus::Parked { reason } })))
+}
+
 async fn get_log(
     State(state): State<Arc<AppState>>,
     Path(id):     Path<Uuid>,
@@ -470,6 +499,11 @@ async fn promote_function(
     let legion_namespace::NodeKind::Json(mut manifest) = node.kind else {
         return Err(server_error("function manifest is not JSON".into()));
     };
+    let runtime = manifest.get("runtime")
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
+        .unwrap_or(FunctionRuntime::Bun);
+    state.deployer.promote_default(&req.name, &runtime, &req.artifact_cid).await
+        .map_err(|error| server_error(error.to_string()))?;
     manifest["artifact_cid"] = Value::String(req.artifact_cid.clone());
     state.namespace.set_json(&path, manifest).await;
     let value = json!({
@@ -478,7 +512,7 @@ async fn promote_function(
         "weight": 10_000,
         "promoted_at": chrono::Utc::now().timestamp_millis(),
     });
-    state.namespace.set_json(&format!("/deploy/routes/{}", req.name), value.clone()).await;
+    state.namespace.delete(&format!("/deploy/routes/{}", req.name)).await;
     Ok(Json(value))
 }
 
@@ -736,6 +770,7 @@ pub async fn serve(state: Arc<AppState>, addr: String, api_key: Option<String>) 
         .route("/workflows/run",                   post(run_workflow))
         .route("/sessions/{id}",                   get(get_session))
         .route("/sessions/{id}/log",               get(get_log))
+        .route("/sessions/{id}/park",              post(park_session))
         .route("/sessions/{id}/messages",          post(send_message))
         .route("/sessions/{id}/stream",            get(stream_session))
         .route("/sessions/{id}/events",            post(session_webhook))

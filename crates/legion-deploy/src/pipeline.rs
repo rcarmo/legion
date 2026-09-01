@@ -158,6 +158,28 @@ impl DeployPipeline {
         self.deploy(job).await
     }
 
+    /// Promote a CAS artifact into the function's default execution path.
+    pub async fn promote_default(
+        &self,
+        name: &str,
+        runtime: &FunctionRuntime,
+        artifact_cid: &str,
+    ) -> Result<PathBuf> {
+        if !is_valid_name(name) {
+            anyhow::bail!("name must match [a-z0-9-]+");
+        }
+        let artifact = self.blob_store.get(artifact_cid).await?;
+        let ext = match runtime {
+            FunctionRuntime::Wasm => "wasm",
+            FunctionRuntime::Bun => "ts",
+        };
+        let dir = self.fn_root.join(name);
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join(format!("index.{ext}"));
+        std::fs::write(&path, artifact)?;
+        Ok(path)
+    }
+
     /// Materialize an artifact from CAS for execution without changing the manifest.
     pub async fn materialize(
         &self,
@@ -303,6 +325,28 @@ mod tests {
             std::fs::read_to_string(dir.path().join("fn/registered/index.ts")).unwrap(),
             "console.log('{}')",
         );
+    }
+
+    #[tokio::test]
+    async fn promotes_an_artifact_to_the_default_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = pipeline(&dir).await;
+        let cid = p
+            .deploy(DeployJob::new(
+                "source",
+                FunctionRuntime::Bun,
+                "",
+                "console.log('promoted')",
+            ))
+            .await
+            .artifact_cid
+            .unwrap();
+        let path = p
+            .promote_default("production", &FunctionRuntime::Bun, &cid)
+            .await
+            .unwrap();
+        assert_eq!(path, dir.path().join("fn/production/index.ts"));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "console.log('promoted')");
     }
 
     #[tokio::test]
