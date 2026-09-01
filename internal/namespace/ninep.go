@@ -39,6 +39,15 @@ func New(tree *Tree) *LegionNamespace {
 	return &LegionNamespace{tree: tree, replies: map[string][]byte{}, peers: map[string]Peer{}}
 }
 func (n *LegionNamespace) Tree() *Tree { return n.tree }
+func (n *LegionNamespace) Read(ctx context.Context, path string) ([]byte, error) {
+	return n.read(ctx, path)
+}
+func (n *LegionNamespace) Write(ctx context.Context, path string, data []byte) ([]byte, error) {
+	if err := n.write(ctx, path, data); err != nil {
+		return nil, err
+	}
+	return n.read(ctx, path)
+}
 func (n *LegionNamespace) WithCapability(token []byte) *LegionNamespace {
 	h := blake3.Sum256(token)
 	n.capability = &h
@@ -89,6 +98,10 @@ func (n *LegionNamespace) exists(p string) bool {
 	return ok
 }
 func (n *LegionNamespace) isDir(p string) bool {
+	v := parts(p)
+	if len(v) == 2 && v[0] == "fn" && n.functions != nil {
+		return false
+	}
 	if p == "/peers" {
 		return true
 	}
@@ -116,7 +129,7 @@ func peerPath(p string) (string, string, bool) {
 }
 func virtual(p string) bool {
 	v := parts(p)
-	return len(v) == 2 && ((v[0] == "sessions" && v[1] == "new") || (v[0] == "deploy" && (v[1] == "register" || v[1] == "route" || v[1] == "promote"))) || len(v) == 3 && ((v[0] == "sessions" && (v[2] == "turns" || v[2] == "status" || v[2] == "context" || v[2] == "fork" || v[2] == "config")) || (v[0] == "fn" && (v[2] == "schema" || v[2] == "versions" || v[2] == "default")) || (v[0] == "deploy" && v[1] == "blobs") || (v[0] == "cluster" && (v[2] == "leader" || v[2] == "health" || v[2] == "self")))
+	return len(v) == 2 && ((v[0] == "sessions" && v[1] == "new") || (v[0] == "deploy" && (v[1] == "push" || v[1] == "register" || v[1] == "route" || v[1] == "promote"))) || len(v) == 3 && ((v[0] == "sessions" && (v[2] == "turns" || v[2] == "status" || v[2] == "context" || v[2] == "fork" || v[2] == "config")) || (v[0] == "fn" && (v[2] == "schema" || v[2] == "versions" || v[2] == "default" || v[2] == "manifest.json")) || (v[0] == "deploy" && v[1] == "blobs") || (v[0] == "cluster" && (v[2] == "leader" || v[2] == "health" || v[2] == "self")))
 }
 func (n *LegionNamespace) read(ctx context.Context, p string) ([]byte, error) {
 	n.mu.RLock()
@@ -128,6 +141,13 @@ func (n *LegionNamespace) read(ctx context.Context, p string) ([]byte, error) {
 	v := parts(p)
 	if len(v) == 3 && v[0] == "fn" && (v[2] == "schema" || v[2] == "versions" || v[2] == "default") {
 		node, ok := n.tree.Get("/fn/" + v[1] + "/manifest.json")
+		if !ok && n.deploy != nil {
+			if data, handled, err := n.deploy.Read(ctx, "/fn/"+v[1]+"/manifest.json"); err != nil {
+				return nil, err
+			} else if handled {
+				node, ok = Node{Kind: JSON, Data: data}, true
+			}
+		}
 		if !ok {
 			return nil, linux.ENOENT
 		}
@@ -153,7 +173,7 @@ func (n *LegionNamespace) read(ctx context.Context, p string) ([]byte, error) {
 			return b, nil
 		}
 	}
-	if strings.HasPrefix(p, "/deploy/") && n.deploy != nil {
+	if (strings.HasPrefix(p, "/deploy/") || strings.HasPrefix(p, "/fn/")) && n.deploy != nil {
 		if b, ok, e := n.deploy.Read(ctx, p); e != nil {
 			return nil, e
 		} else if ok {
@@ -294,7 +314,8 @@ func (f *file) StatFS() (p9.FSStat, error) {
 	return p9.FSStat{Type: 0x01021994, BlockSize: 4096, NameLength: 255}, nil
 }
 func (f *file) Open(mode p9.OpenFlags) (p9.QID, uint32, error) {
-	if f.ns.isDir(f.path) && mode.Mode() != p9.ReadOnly {
+	functionCall := len(parts(f.path)) == 2 && parts(f.path)[0] == "fn"
+	if f.ns.isDir(f.path) && mode.Mode() != p9.ReadOnly && !functionCall {
 		return p9.QID{}, 0, linux.EISDIR
 	}
 	return qid(f.path, f.ns.isDir(f.path)), 0, nil

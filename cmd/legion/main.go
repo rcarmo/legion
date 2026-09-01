@@ -17,14 +17,35 @@ import (
 	"github.com/rcarmo/legion/internal/agent"
 	"github.com/rcarmo/legion/internal/cluster"
 	"github.com/rcarmo/legion/internal/core"
+	"github.com/rcarmo/legion/internal/deploy"
 	legionns "github.com/rcarmo/legion/internal/namespace"
 	"github.com/rcarmo/legion/internal/raftstore"
+	legionruntime "github.com/rcarmo/legion/internal/runtime"
+	bunruntime "github.com/rcarmo/legion/internal/runtime/bun"
+	"github.com/rcarmo/legion/internal/runtime/joker"
+	wasmruntime "github.com/rcarmo/legion/internal/runtime/wasm"
+	"github.com/tmc/go-iroh/blobs"
 	"github.com/tmc/go-iroh/iroh"
 	"github.com/tmc/go-iroh/key"
 	"github.com/tmc/go-iroh/netaddr"
 )
 
 var version = "dev"
+
+type runtimeNamespaceAdapter struct{ target **legionns.LegionNamespace }
+
+func (a runtimeNamespaceAdapter) Read(ctx context.Context, path string) ([]byte, error) {
+	if a.target == nil || *a.target == nil {
+		return nil, fmt.Errorf("namespace unavailable")
+	}
+	return (*a.target).Read(ctx, path)
+}
+func (a runtimeNamespaceAdapter) Write(ctx context.Context, path string, data []byte) ([]byte, error) {
+	if a.target == nil || *a.target == nil {
+		return nil, fmt.Errorf("namespace unavailable")
+	}
+	return (*a.target).Write(ctx, path, data)
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -82,7 +103,29 @@ func run() error {
 	routed := cluster.NewRoutedStore(store, directory)
 	tree := legionns.NewTree()
 	agentLoop := agent.New(routed, core.EchoToolRegistry{}, agent.GoAI{})
-	namespace := legionns.New(tree).WithResources(legionns.NewSessionResources(routed, agentLoop)).WithDeploy(legionns.TreeDeploy{Tree: tree}).WithCluster(legionns.LiveCluster{Node: node, Store: store, Tree: tree})
+	registry, err := deploy.Open(filepath.Join(*dataDir, "functions"))
+	if err != nil {
+		return fmt.Errorf("deployment registry: %w", err)
+	}
+	limits := legionruntime.DefaultLimits()
+	var runtimeNamespace *legionns.LegionNamespace
+	wasmHost := runtimeNamespaceAdapter{target: &runtimeNamespace}
+	wasm := wasmruntime.New(registry.CAS(), wasmHost, nil, limits)
+	defer wasm.Close(context.Background())
+	bun := bunruntime.New("", registry.CAS(), limits)
+	jokerRuntime := joker.New("", registry.CAS(), limits)
+	functions := legionruntime.Functions{Registry: registry, WASM: legionruntime.NewBoundedInvoker(wasm, limits), Bun: legionruntime.NewBoundedInvoker(bun, limits), Joker: legionruntime.NewBoundedInvoker(jokerRuntime, limits)}
+	deployResources := deploy.Resources{Registry: registry, OnRegister: func(manifest legionruntime.Manifest) {
+		tree.EnsureDir("/fn/" + manifest.Name)
+		_ = tree.SetJSON("/fn/"+manifest.Name+"/manifest.json", manifest)
+	}}
+	for _, name := range registry.Names() {
+		if manifest, ok := registry.Manifest(name); ok {
+			deployResources.OnRegister(manifest)
+		}
+	}
+	namespace := legionns.New(tree).WithResources(legionns.NewSessionResources(routed, agentLoop)).WithDeploy(deployResources).WithFunctions(functions).WithCluster(legionns.LiveCluster{Node: node, Store: store, Tree: tree})
+	runtimeNamespace = namespace
 	if *capability != "" {
 		namespace.WithCapability([]byte(*capability))
 	}
@@ -117,7 +160,7 @@ func run() error {
 	}, func(peer string) {
 		log.Printf("peer left: %s", peer)
 		namespace.UnregisterPeer(peer)
-	}, map[string]iroh.ProtocolHandler{legionns.ALPN: namespace.Handler()})
+	}, map[string]iroh.ProtocolHandler{legionns.ALPN: namespace.Handler(), blobs.ALPN: registry.CAS().Handler()})
 	if err != nil {
 		return err
 	}

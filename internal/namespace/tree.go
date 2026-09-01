@@ -32,10 +32,10 @@ type Tree struct {
 
 func NewTree() *Tree {
 	t := &Tree{nodes: make(map[string]Node), changed: make(chan struct{})}
-	for _, p := range []string{"/", "/fn", "/sessions", "/deploy", "/deploy/blobs", "/cluster", "/cluster/peers", "/peers"} {
+	for _, p := range []string{"/", "/fn", "/sessions", "/deploy", "/deploy/blobs", "/deploy/routes", "/cluster", "/cluster/peers", "/peers"} {
 		t.nodes[p] = Node{Kind: Directory, UpdatedAt: time.Now().UnixMilli()}
 	}
-	for _, p := range []string{"/sessions/new", "/deploy/register", "/deploy/route", "/deploy/promote"} {
+	for _, p := range []string{"/sessions/new", "/deploy/push", "/deploy/register", "/deploy/route", "/deploy/promote"} {
 		t.nodes[p] = Node{Kind: Blob, UpdatedAt: time.Now().UnixMilli()}
 	}
 	for _, p := range []string{"/cluster/leader", "/cluster/health", "/cluster/self"} {

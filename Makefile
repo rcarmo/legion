@@ -10,7 +10,7 @@ GO ?= go
 GO_TOOLCHAIN ?= go1.26.5
 GO_ENV := GOTOOLCHAIN=$(GO_TOOLCHAIN) CGO_ENABLED=0
 
-.PHONY: go-fmt go-fmt-check go-test go-test-core go-test-store go-test-agent go-vet go-check go-rust-interop go-ninep-interop \
+.PHONY: go-fmt go-fmt-check go-test go-test-core go-test-store go-test-agent go-vet go-check go-rust-interop go-ninep-interop go-blob-interop \
 	help preflight postflight space build release test lint fmt fmt-check check verify-m3 \
 	clean clean-junk distclean docs dev server integration-test cli-integration-test \
 	wasm-fixture wasm-integration-test otel-integration-test backup-restore-drill bun-ninep-integration-test dashboard-integration-test js-test load-test load-test-http load-test-hiqlite server-release install uninstall test-core test-store test-loop \
@@ -62,6 +62,10 @@ go-rust-interop: preflight
 go-ninep-interop: preflight
 	$(CARGO) build -p legion-cluster --bin legion-ninep-interop-fixture
 	$(GO_ENV) $(GO) test -tags rustinterop -count=1 -timeout=60s -run TestRustGoNinePInterop -v ./internal/namespace
+
+go-blob-interop: preflight
+	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) build -p legion-cluster --bin legion-blob-interop-fixture
+	$(GO_ENV) $(GO) test -tags rustinterop -count=1 -timeout=60s -run 'Test(RustServesGo|GoServesRust)FetchesBlob' -v ./internal/deploy
 
 preflight: clean-junk
 	@free_gb=$$(df -Pk "$(CURDIR)" | awk 'NR==2 {print int($$4/1024/1024)}'); \
@@ -167,7 +171,8 @@ cli-integration-test: server
 	@./tests/integration/cli.sh
 
 wasm-fixture: preflight
-	$(CARGO) build --manifest-path tests/fixtures/wasm-hello/Cargo.toml --release --target wasm32-wasip1
+	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) build --manifest-path tests/fixtures/wasm-hello/Cargo.toml --release --target wasm32-wasip1
+	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) build --manifest-path tests/fixtures/wasm-host/Cargo.toml --release --target wasm32-wasip1
 
 wasm-integration-test: server wasm-fixture
 	@./tests/integration/wasm_server_smoke.sh
@@ -216,3 +221,23 @@ install:
 
 uninstall:
 	./contrib/systemd/uninstall.sh
+
+JOKER_VERSION ?= v1.8.0
+JOKER_REVISION := edd0fe7fff7b2bae3a714a9918502f7dd3b21d5f
+JOKER_BIN ?= $(CURDIR)/bin/joker
+
+.PHONY: joker-worker go-verify-m3
+joker-worker:
+	@mkdir -p "$(dir $(JOKER_BIN))"
+	@dir="$$(GOTOOLCHAIN=$(GO_TOOLCHAIN) $(GO) mod download -json github.com/rcarmo/go-joker@$(JOKER_VERSION) | awk -F'"' '/"Dir":/ {print $$4}')"; \
+	 test -n "$$dir" || { echo 'ERROR: cannot download pinned Joker'; exit 1; }; \
+	 cd "$$dir" && GOTOOLCHAIN=$(GO_TOOLCHAIN) CGO_ENABLED=0 $(GO) build -trimpath -ldflags '-X github.com/candid82/joker/core.VERSION=$(JOKER_VERSION)' -o "$(JOKER_BIN)" .
+
+# Pure-Go Milestone 3 gate, including the separately built Joker worker and the
+# existing Extism fixture shared with the Rust implementation.
+go-verify-m3: preflight joker-worker wasm-fixture go-blob-interop
+	LEGION_JOKER_TEST_BIN="$(JOKER_BIN)" LEGION_BUN_TEST_BIN="$$(command -v bun)" $(GO_ENV) $(GO) test -count=1 ./internal/deploy ./internal/runtime/...
+	LEGION_JOKER_TEST_BIN="$(JOKER_BIN)" LEGION_BUN_TEST_BIN="$$(command -v bun)" $(GO_ENV) $(GO) test -count=1 ./internal/namespace ./cmd/legion
+	$(GO_ENV) $(GO) build -o $(CURDIR)/bin/legion ./cmd/legion
+	LEGION_BUN_BIN="$$(command -v bun)" ./tests/integration/go_m3_smoke.sh
+	@$(MAKE) --no-print-directory postflight

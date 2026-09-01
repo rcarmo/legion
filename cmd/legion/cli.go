@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -63,6 +65,64 @@ func runCLI(args []string) (bool, error) {
 			p = "/namespace/cluster/peers"
 		} else {
 			p = "/cluster/" + field
+		}
+	case "deploy":
+		if len(args) < 2 {
+			return true, fmt.Errorf("usage: legion deploy push|register|route|promote")
+		}
+		method = "POST"
+		switch args[1] {
+		case "push":
+			if len(args) == 3 {
+				artifact, err := os.ReadFile(args[2])
+				if err != nil {
+					return true, err
+				}
+				body, p = artifact, "/deploy/push"
+			} else if len(args) == 5 {
+				artifact, err := os.ReadFile(args[4])
+				if err != nil {
+					return true, err
+				}
+				job := map[string]any{"name": args[2], "runtime": args[3]}
+				if args[3] == "wasm" {
+					job["wasm_b64"] = base64.StdEncoding.EncodeToString(artifact)
+				} else {
+					job["code"] = string(artifact)
+				}
+				body, _ = json.Marshal(job)
+				p = "/deploy/register"
+			} else {
+				return true, fmt.Errorf("usage: legion deploy push PATH | NAME wasm|bun|joker PATH")
+			}
+		case "register":
+			if len(args) != 5 {
+				return true, fmt.Errorf("usage: legion deploy register NAME CID wasm|bun|joker")
+			}
+			body, _ = json.Marshal(map[string]any{"name": args[2], "cid": args[3], "runtime": args[4]})
+			p = "/deploy/register"
+		case "route":
+			if len(args) != 5 {
+				return true, fmt.Errorf("usage: legion deploy route NAME CID WEIGHT")
+			}
+			weight, err := strconv.ParseUint(args[4], 10, 16)
+			if err != nil || weight > 10000 {
+				return true, fmt.Errorf("weight must be 0..10000")
+			}
+			body, _ = json.Marshal(map[string]any{"name": args[2], "artifact_cid": args[3], "weight": weight})
+			p = "/deploy/route"
+		case "promote":
+			if len(args) < 3 || len(args) > 4 {
+				return true, fmt.Errorf("usage: legion deploy promote NAME [CID]")
+			}
+			request := map[string]any{"name": args[2]}
+			if len(args) == 4 {
+				request["artifact_cid"] = args[3]
+			}
+			body, _ = json.Marshal(request)
+			p = "/deploy/promote"
+		default:
+			return true, fmt.Errorf("unknown deploy command %q", args[1])
 		}
 	case "call":
 		if len(args) < 2 {

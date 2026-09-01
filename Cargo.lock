@@ -3714,6 +3714,7 @@ dependencies = [
  "chrono",
  "futures",
  "iroh",
+ "iroh-blobs",
  "iroh-gossip",
  "iroh-mdns-address-lookup",
  "jetstream_9p",

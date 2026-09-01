@@ -102,22 +102,29 @@ Go/iroh round trips, peer forwarding, blocking reads, and dynamic session tests 
 
 **Goal**: Functions can be deployed as WASM or Joker bundles and invoked from the namespace.
 
-- [ ] `internal/deploy`: CAS deployment (artifacts are stored by BLAKE3 CID and materialized locally for execution)
-  - [ ] go-iroh blobs integration with Rust ticket/CID compatibility
-  - [ ] `push`, `register`, `route`, `promote` commands
-  - [ ] Canary weighted routing
-- [ ] `internal/runtime/wasm`: general WASM executor
-  - [ ] wazero + Extism Go SDK integration
-  - [ ] Host functions (log, read, write, budget)
-  - [ ] Context/listener-based CPU and wall-time limits (wazero has no portable fuel contract)
-  - [ ] Memory limit enforcement
-  - [ ] Blob fetch + local cache
-- [ ] `internal/runtime/joker`: bundled `rcarmo/go-joker` executor
-  - [ ] pinned Joker worker + newline-delimited JSON stdio protocol
-  - [ ] Timeout + process termination
-  - [ ] Environment variable injection
-- [ ] CLI: `legion deploy`
-- [ ] Integration tests: deploy and invoke WASM and Joker functions
+- [x] `internal/deploy`: CAS deployment (artifacts are stored by BLAKE3 CID and materialized locally for execution)
+  - [x] go-iroh blobs integration with Rust ticket/CID compatibility
+  - [x] `push`, `register`, `route`, `promote` commands
+  - [x] Canary weighted routing
+- [x] `internal/runtime/wasm`: general WASM executor
+  - [x] wazero + Extism Go SDK integration
+  - [x] Host functions (log, read, write, budget)
+  - [x] Context/listener-based CPU and wall-time limits (wazero has no portable fuel contract)
+  - [x] Memory limit enforcement
+  - [x] Blob fetch + local cache
+- [x] `internal/runtime/joker`: bundled `rcarmo/go-joker` executor
+  - [x] pinned Joker worker + newline-delimited JSON stdio protocol
+  - [x] Timeout + process termination
+  - [x] Environment variable injection
+- [x] CLI: `legion deploy`
+- [x] Integration tests: deploy and invoke WASM and Joker functions
+- [x] Optional native Bun subprocess runtime, preserving Rust's `runtime: "bun"` manifest value
+
+Completed in the Go port with BLAKE3 CAS materialization, persistent manifests and
+weighted routes, Extism/wazero execution, and separately supervised Bun and pinned
+Joker workers. `make go-verify-m3` proves bidirectional Rust/Go iroh blob transfer,
+WASM host functions and limits, namespace invocation, and process-level CLI/REST
+deployment and invocation for WASM, Bun, and Joker.
 
 **Exit criteria**: A Joker function and a WASM function can be deployed and invoked via `legion call` and via the 9P namespace.
 

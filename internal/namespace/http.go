@@ -34,6 +34,7 @@ func (a REST) Handler() http.Handler {
 	mux.HandleFunc("POST /sessions/{id}/messages", a.session)
 	mux.HandleFunc("GET /cluster/{field}", a.cluster)
 	mux.HandleFunc("POST /functions/{name}/invoke", a.function)
+	mux.HandleFunc("POST /deploy/{operation}", a.deploy)
 	return mux
 }
 func (a REST) path(w http.ResponseWriter, r *http.Request) {
@@ -104,6 +105,20 @@ func (a REST) session(w http.ResponseWriter, r *http.Request) {
 }
 func (a REST) cluster(w http.ResponseWriter, r *http.Request) {
 	b, err := a.Namespace.ReadPath(r, "/cluster/"+r.PathValue("field"))
+	writeHTTP(w, b, err)
+}
+func (a REST) deploy(w http.ResponseWriter, r *http.Request) {
+	operation := r.PathValue("operation")
+	if operation != "push" && operation != "register" && operation != "route" && operation != "promote" {
+		writeHTTP(w, nil, fmt.Errorf("unknown deployment operation %q", operation))
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<20))
+	if err != nil {
+		writeHTTP(w, nil, err)
+		return
+	}
+	b, err := a.Namespace.WritePath(r, "/deploy/"+operation, body)
 	writeHTTP(w, b, err)
 }
 func (a REST) function(w http.ResponseWriter, r *http.Request) {
