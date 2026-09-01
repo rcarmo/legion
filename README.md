@@ -81,6 +81,16 @@ After a few weeks of pondering, this is what I came up with, and substantiated i
 | `wasmtime` + `extism` | WASM function runtime, because, well, I don't want to have separate Intel and ARM functions, and this combo seemed moderately sane even though I mostly use Go for WASM |
 | `openraft` | Consensus engine (used via hiqlite) |
 
+## Examples
+
+[`examples/`](examples/) contains twelve runnable applications covering Bun and WASM functions, durable chat, agent workflows, supervised children, web and Telegram channels, native 9P access, approval, canary deployment, cluster inspection, and restic backup. Run the provider-free suite with:
+
+```sh
+make examples-test
+```
+
+The model-backed and Telegram examples list their environment requirements in their own READMEs.
+
 ## Status
 
 Early design stage. See [docs/10-roadmap.md](docs/10-roadmap.md) for milestone plan, or 99-world-domination.md (when robots take over running this) for the end state.

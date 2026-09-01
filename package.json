@@ -1,6 +1,7 @@
 {
   "name": "legion-js-workspace",
   "private": true,
+  "type": "module",
   "workspaces": ["packages/*"],
   "scripts": {
     "test": "bun test packages",

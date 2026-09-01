@@ -9,7 +9,7 @@ TARGET_WARN_GB ?= 10
 
 .PHONY: help preflight postflight space build release test lint fmt fmt-check check verify-m3 \
 	clean clean-junk distclean docs dev server integration-test cli-integration-test \
-	wasm-fixture wasm-integration-test otel-integration-test backup-restore-drill bun-ninep-integration-test dashboard-integration-test js-test load-test load-test-http load-test-hiqlite server-release install uninstall test-core test-store test-loop \
+	wasm-fixture wasm-integration-test otel-integration-test backup-restore-drill bun-ninep-integration-test dashboard-integration-test js-test examples-test example-wasm load-test load-test-http load-test-hiqlite server-release install uninstall test-core test-store test-loop \
 	test-namespace test-deploy test-cluster test-ecosystem test-runtime-extism
 
 help:
@@ -18,6 +18,7 @@ help:
 	  '  make verify-m3           One-pass Milestone 3 verification' \
 	  '  make check               Format, lint, and test the workspace' \
 	  '  make integration-test    Build once, then run Bun integration tests' \
+	  '  make examples-test       Build and run provider-free application examples' \
 	  '  make wasm-integration-test  Build server/fixture once, then smoke test' \
 	  '  make clean-junk          Remove temp files and accidental nested targets' \
 	  '  make clean               Remove Cargo build output' \
@@ -143,7 +144,7 @@ js-test:
 	bun run build:client
 	bun run typecheck
 	bun -e 'import("./packages/client/dist/index.js").then(m => { if (typeof m.LegionClient !== "function") process.exit(1) })'
-	bun test packages
+	bun test packages tests/examples
 
 bun-ninep-integration-test: server js-test
 	@./tests/integration/bun_ninep_smoke.sh
@@ -151,6 +152,17 @@ bun-ninep-integration-test: server js-test
 
 dashboard-integration-test: server js-test
 	@./tests/integration/dashboard_smoke.sh
+	@$(MAKE) --no-print-directory postflight
+
+example-wasm: preflight
+	$(CARGO) build --manifest-path examples/hello-wasm/Cargo.toml --target wasm32-wasip1 --release
+	@$(MAKE) --no-print-directory postflight
+
+examples-test: server js-test example-wasm
+	@./tests/examples/run.sh
+	@./tests/examples/wasm.sh
+	@./tests/examples/bun_9p.sh
+	@./examples/backup-drill/run.sh --isolated-drill
 	@$(MAKE) --no-print-directory postflight
 
 backup-restore-drill: clean-junk
