@@ -21,16 +21,19 @@
   <header><h1>Legion Web Chat</h1><span id="status">Connecting…</span></header>
   <section id="log" aria-live="polite"></section>
   <form><input autofocus autocomplete="off" placeholder="Message Legion…" disabled><button disabled>Send</button></form>
-  <footer>Each browser connection uses its own durable Legion session and a free OpenCode model.</footer>
+  <footer>Conversation history is restored from a durable Legion session. This browser uses a free OpenCode model.</footer>
 </main>
 <script>
 const log=document.querySelector('#log'),input=document.querySelector('input'),button=document.querySelector('button'),status=document.querySelector('#status');
 const add=(kind,text)=>{const item=document.createElement('div');item.className=`message ${kind}`;item.textContent=text;log.append(item);log.scrollTop=log.scrollHeight};
 const setStatus=(text,kind='')=>{status.textContent=text;status.className=kind};
-const ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`);
-ws.onopen=()=>{setStatus('Connected','online');input.disabled=button.disabled=false;input.focus()};
+const storedSession=localStorage.getItem('legion.webChat.session');
+const wsUrl=new URL(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`);
+if(storedSession)wsUrl.searchParams.set('session',storedSession);
+const ws=new WebSocket(wsUrl);
+ws.onopen=()=>setStatus('Restoring…');
 ws.onclose=()=>{setStatus('Disconnected','error');input.disabled=button.disabled=true};
 ws.onerror=()=>setStatus('Connection error','error');
-ws.onmessage=e=>{const m=JSON.parse(e.data);add(m.error?'error':'legion',m.error?`Error: ${m.error}`:m.text)};
-document.querySelector('form').onsubmit=e=>{e.preventDefault();const text=input.value.trim();if(!text||ws.readyState!==WebSocket.OPEN)return;add('user',text);ws.send(JSON.stringify({text}));input.value=''};
+ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type==='ready'){localStorage.setItem('legion.webChat.session',m.sessionId);log.replaceChildren();for(const item of m.history)add(item.role,item.text);setStatus('Connected','online');input.disabled=button.disabled=false;input.focus();return}if(m.type==='error'||m.error){add('error',`Error: ${m.error}`);return}add('legion',m.text)};
+document.querySelector('form').onsubmit=e=>{e.preventDefault();const text=input.value.trim();if(!text||ws.readyState!==WebSocket.OPEN||input.disabled)return;add('user',text);ws.send(JSON.stringify({text}));input.value=''};
 </script></body></html>
