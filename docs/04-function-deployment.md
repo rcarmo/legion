@@ -31,7 +31,7 @@ You never say "version 2.1.0" — you say "the function at CID bafkrei...". Sema
      --runtime bun \
      --schema schema.json
      → Raft entry: RegisterFunction { name, cid, runtime, schema, version }
-     → Committed → cluster metadata resolves "my-agent" → CID
+     → Committed → all nodes resolve "my-agent" → CID
 
 4. Route traffic
    By default, the most recently registered CID becomes the default.
@@ -96,7 +96,7 @@ routes = [
 ]
 ```
 
-The receiving node selects the canary deterministically from the generated `call_id` and configured weight. Milestone 6 selects the CID at the gateway before executor placement, so retries keep the same version.
+Traffic is split probabilistically at request time. The weight is stored as a Raft entry; all nodes route identically.
 
 ### Atomic promotion
 
@@ -104,8 +104,8 @@ To promote a canary to 100%:
 
 ```
 legion deploy promote --name my-agent --cid bafkrei_v2...
-  → update the default manifest CID
-  → subsequent calls on that node use the promoted artifact
+  → Raft entry: SetDefaultRoute { name, cid }
+  → Committed → all nodes switch instantly
 ```
 
 ### Rollback
@@ -117,9 +117,14 @@ legion deploy rollback --name my-agent --to bafkrei_v1...
 
 ## Blob Distribution
 
-Blobs are stored in a local `iroh-blobs` `FsStore` and identified by BLAKE3 CID. The current deployment pipeline persists, verifies, and materialises artifacts on the node that receives the deployment. It does not yet connect blob providers across Legion nodes.
+Blobs are stored in iroh-blobs, which handles peer-to-peer distribution automatically:
 
-Milestone 6 adds peer-to-peer fetch on first remote use, CID verification, single-flight transfer, and cache leases. See [15 — Distributed Execution](15-distributed-execution.md).
+- When a blob is pushed to node A, nodes B and C fetch it on first use
+- Content integrity is structurally guaranteed (hash == content)
+- A node that has the blob can serve it to any peer that requests it
+- Blobs are never modified; the CID is a permanent identifier
+
+The `legion-deploy` crate uses iroh-blobs' native transfer protocol — no HTTP, no registry service.
 
 ## CLI Reference
 

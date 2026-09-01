@@ -33,8 +33,8 @@ In particular, extism will let me plug in my own network functions and have a ru
 ### WASM execution flow
 
 ```
-1. Resolve function name → CID from the local namespace registry
-2. Read the blob from the node-local iroh-blobs store
+1. Resolve function name → CID (from hiqlite function registry)
+2. Fetch blob from iroh-blobs (cached locally after first fetch)
 3. Create extism Plugin from wasm bytes
 4. Set up host functions (9P namespace access, budget tracking)
 5. plugin.call("run", input_json) → output_json
@@ -99,8 +99,8 @@ Bun functions run as child processes. The parent Legion process communicates wit
 ### Bun execution flow
 
 ```
-1. Resolve function name → CID from the local namespace registry
-2. Read the blob from the node-local iroh-blobs store → materialise the CID-specific path
+1. Resolve function name → CID
+2. Fetch blob from iroh-blobs → write to temp path (or memfd)
 3. Spawn: bun run /tmp/legion-fn-<cid>.js
 4. Write JSON input to worker stdin
 5. Read JSON output from worker stdout
@@ -184,13 +184,13 @@ Bun functions run in a separate process group. On timeout or budget exhaustion, 
 
 ## Caching
 
-Function blobs are stored by CID in the node-local iroh-blobs store and materialised under the function root:
+Function blobs are cached locally after the first fetch from iroh-blobs:
 
 ```
 iroh-blobs local store: /var/lib/legion/blobs/
 ```
 
-The content-addressed store verifies blobs by CID. The current runtime does not fetch a missing CID from another node. Milestone 6 adds peer fetch, verification, single-flight transfer, and execution leases; see [15 — Distributed Execution](15-distributed-execution.md).
+The cache is content-addressed (CID = hash), so stale entries are impossible by construction. Eviction is time-based (LRU, configurable TTL) with a configurable size limit.
 
 ---
 

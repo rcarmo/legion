@@ -140,55 +140,6 @@ Checklist last reconciled with the implementation and test suite on 2026-08-31. 
 
 ---
 
-## Milestone 6: Distributed Execution
-
-**Goal**: Any healthy node can accept a function call and execute it on an eligible cluster node with load-aware placement, bounded failover, verified artifact transfer, and explicit retry safety.
-
-The protocol, scheduling rules, failure semantics, API changes, delivery phases, and acceptance gates are defined in [15 — Distributed Execution](15-distributed-execution.md).
-
-- [ ] Versioned authenticated remote invocation protocol over iroh
-  - [ ] Explicit remote Bun and WASM execution
-  - [ ] Admission reservation and destination-side limit enforcement
-  - [ ] Absolute deadline, cancellation, and trace propagation
-  - [ ] Bounded control frames and CID-backed large payloads
-- [ ] Executor membership and capacity
-  - [ ] Runtime and ABI capability advertisement
-  - [ ] Freshness expiry, drain state, labels, capacity, and inflight load
-  - [ ] Bounded artifact-locality summary
-  - [ ] Execution allow-list and mixed-version exclusion
-- [ ] Decentralised scheduling
-  - [ ] Eligibility filtering
-  - [ ] Power-of-two load-aware selection
-  - [ ] Local fallback and circuit breaking
-  - [ ] `local`, `spread`, `affinity`, `pinned`, and `leader` placement modes
-- [ ] Cluster artifact distribution
-  - [ ] Peer-to-peer fetch on cache miss
-  - [ ] CID verification and atomic materialisation
-  - [ ] Single-flight transfer and execution leases
-  - [ ] Heterogeneous runtime and architecture constraints
-- [ ] Retry and result safety
-  - [ ] Idempotent retry with stable `call_id`
-  - [ ] Executor deduplication and retained terminal results
-  - [ ] Replicated ownership leases for non-idempotent calls
-  - [ ] Ambiguous-outcome records and reconciliation commands
-- [ ] Operations and observability
-  - [ ] Drain and uncordon controls
-  - [ ] REST, CLI, 9P, tool, workflow, and dashboard integration
-  - [ ] Scheduler, admission, transfer, retry, and per-node metrics
-  - [ ] Gateway-to-executor distributed traces
-  - [ ] Rolling upgrade and rollback runbook
-- [ ] Three-node capacity and failure gates
-  - [ ] Capacity-weighted distribution within 20% across 10,000 calls at concurrency 96
-  - [ ] No executor exceeds its per-function concurrency ceiling
-  - [ ] Bounded overload shedding with HTTP 429
-  - [ ] Executor and gateway crash recovery
-  - [ ] Non-idempotent ambiguity without automatic duplicate execution
-  - [ ] Partition, stale peer, drain, deadline, corrupt artifact, and mixed-version tests
-
-**Exit criteria**: All 18 acceptance gates in `docs/15-distributed-execution.md` pass on an isolated three-node cluster, and existing single-node behaviour remains compatible through `placement = "local"`.
-
----
-
 ## Design Decisions Log
 
 | Decision | Rationale |

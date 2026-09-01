@@ -123,13 +123,12 @@ legion-server
 1. Build: bun build --target=bun fn.ts → fn.js  (or compile to WASM)
    │
 2. legion-deploy push fn.js
-   → iroh-blobs store → CID = BLAKE3(content)
+   → iroh-blobs store → CID = sha256(content)
    │
 3. legion-deploy register --name my-fn --cid <hash> --runtime bun
    → Raft entry: RegisterFunction { name, cid, runtime, schema }
    │
-4. Current implementation: the receiving node resolves "my-fn" → CID → materialises the local blob → executes locally
-5. Milestone 6: the receiving gateway selects an eligible executor → executor fetches the CID on demand → executes locally or remotely
+4. All nodes: resolve "my-fn" → CID → fetch blob on demand → execute
 ```
 
 ## Node Startup Sequence
@@ -157,4 +156,4 @@ legion-server
 | Network partition | iroh relay fallback; Raft pauses until quorum restored |
 | Dangling write-ahead | Session status → `PendingReconciliation`; blocks resume until resolved |
 | Node rejoins after partition | Raft log catch-up; iroh reconnects by public key automatically |
-| Function blob missing | Current: local invocation fails. Milestone 6: fetch and verify it from a known peer provider. |
+| Function blob missing | Fetch from any peer that has the CID; iroh-blobs handles routing |

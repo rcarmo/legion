@@ -2,7 +2,7 @@
 
 ![Legion icon](docs/icon-256.png)
 
-> A self-hosted durable functions platform with Raft-replicated state, content-addressed local artifacts, and a 9P namespace for AI agents and WASM/Bun functions on LAN-discovered nodes.
+> A self-hosted, self-healing durable functions platform with Raft consensus, content-addressed storage, and a 9P namespace — running AI agents and WASM/Bun functions across a LAN-bootstrapped P2P cluster.
 
 Legion is the open, self-hostable equivalent of Cloudflare Agents / Durable Objects, built entirely in Rust. Consider it a learning experience in various ways, informed by my interest in Plan9, general concerns about doing lifecycle management The Right Way<sup>TM</sup>, and wanting something I could run locally across Intel and ARM machines (often very low powered SBCs).
 
@@ -11,7 +11,7 @@ It's also a stab at making [`piclaw`](https://github.com/rcarmo/piclaw)'s back-e
 ## What It Is
 
 - **Durable agent loop** — AI agent turns are event-sourced and crash-resumable on any cluster node
-- **Replicated state** — Raft consensus via hiqlite (openraft + SQLite) replicates durable session state; automatic cross-node function scheduling is scoped in Milestone 6
+- **Distributed by default** — Raft consensus via hiqlite (openraft + SQLite) replicates all state
 - **Content-addressed deployment** — Functions are WASM modules or Bun bundles stored by hash via iroh-blobs; deployment is push-a-blob + register
 - **Self-healing** — iroh P2P reconnects by public key, not IP; mDNS bootstraps the cluster with zero config on a LAN
 - **9P namespace** — Every cluster resource (functions, sessions, peers) is accessible as a file path via jetstream
@@ -112,4 +112,3 @@ Early design stage. See [docs/10-roadmap.md](docs/10-roadmap.md) for milestone p
 - [12 — Backup and Restore](docs/12-backup-restore.md)
 - [13 — Load Testing](docs/13-load-testing.md)
 - [14 — Agent Ecosystem](docs/14-agent-ecosystem.md)
-- [15 — Distributed Execution](docs/15-distributed-execution.md)
