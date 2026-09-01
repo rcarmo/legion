@@ -10,7 +10,7 @@ GO ?= go
 GO_TOOLCHAIN ?= go1.26.5
 GO_ENV := GOTOOLCHAIN=$(GO_TOOLCHAIN) CGO_ENABLED=0
 
-.PHONY: go-fmt go-fmt-check go-test go-test-core go-test-store go-test-agent go-vet go-check \
+.PHONY: go-fmt go-fmt-check go-test go-test-core go-test-store go-test-agent go-vet go-check go-rust-interop \
 	help preflight postflight space build release test lint fmt fmt-check check verify-m3 \
 	clean clean-junk distclean docs dev server integration-test cli-integration-test \
 	wasm-fixture wasm-integration-test otel-integration-test backup-restore-drill bun-ninep-integration-test dashboard-integration-test js-test load-test load-test-http load-test-hiqlite server-release install uninstall test-core test-store test-loop \
@@ -31,10 +31,10 @@ help:
 	  '  make go-test-store       Focused pure-Go SQLite tests'
 
 go-fmt:
-	$(GO_ENV) $(GO) fmt ./internal/...
+	$(GO_ENV) $(GO) fmt ./cmd/... ./internal/...
 
 go-fmt-check:
-	@test -z "$$(gofmt -l internal 2>/dev/null)" || { gofmt -l internal; exit 1; }
+	@test -z "$$(gofmt -l cmd internal 2>/dev/null)" || { gofmt -l cmd internal; exit 1; }
 
 go-test-core: preflight
 	$(GO_ENV) $(GO) test ./internal/core
@@ -54,6 +54,10 @@ go-vet: preflight
 go-check: preflight go-fmt-check
 	$(GO_ENV) $(GO) vet ./...
 	$(GO_ENV) $(GO) test ./...
+
+go-rust-interop: preflight
+	$(CARGO) build -p legion-cluster --bin legion-interop-fixture --bin legion-gossip-interop-fixture
+	$(GO_ENV) $(GO) test -tags rustinterop -count=1 -timeout=120s -run 'TestRustGo(Direct|Relay|Gossip)' -v ./internal/cluster
 
 preflight: clean-junk
 	@free_gb=$$(df -Pk "$(CURDIR)" | awk 'NR==2 {print int($$4/1024/1024)}'); \

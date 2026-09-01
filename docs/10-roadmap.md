@@ -46,22 +46,32 @@ the mixed-language event-envelope hash contract.
 
 **Goal**: 3-node cluster with Raft-replicated state and mDNS discovery.
 
-- [ ] `internal/cluster`: go-iroh + mDNS bootstrap
-  - [ ] `tmc/go-iroh` endpoint setup + keypair persistence
-  - [ ] mixed Rust/Go direct and relay interoperability
-  - [ ] Bonjour/mDNS LAN discovery and service registration
-  - [ ] go-iroh gossip membership with Rust interoperability
-  - [ ] Hashicorp Raft bootstrap (stable node IDs/addresses; join as nonvoter then voter)
-- [ ] `internal/raftstore`: replicate the SQLite-backed store
-  - [ ] versioned typed Raft commands wrapping the `EventStore`
-  - [ ] `raft-boltdb/v2`/bbolt durable Raft log and stable store
-  - [ ] transactional pure-Go SQLite materialized state on every voter
-  - [ ] local notification mechanism for park/resume wakeup
-  - [ ] leader barriers/leases for leader-only operations
-- [ ] Integration test: 3-node cluster, session survives leader kill
-- [ ] `cmd/legion`: Node startup sequence
+- [x] `internal/cluster`: go-iroh + mDNS bootstrap
+  - [x] `tmc/go-iroh` endpoint setup + keypair persistence
+  - [x] mixed Rust/Go direct and relay interoperability
+  - [x] Bonjour/mDNS LAN discovery and service registration
+  - [x] go-iroh gossip membership with Rust interoperability
+  - [x] Hashicorp Raft bootstrap (stable node IDs/addresses; join as nonvoter then voter)
+- [x] `internal/raftstore`: replicate the SQLite-backed store
+  - [x] versioned typed Raft commands wrapping the `EventStore`
+  - [x] `raft-boltdb/v2`/bbolt durable Raft log and stable store
+  - [x] transactional pure-Go SQLite materialized state on every voter
+  - [x] local notification mechanism for park/resume wakeup
+  - [x] leader barriers/leases for leader-only operations
+- [x] Integration test: 3-node cluster, session survives leader kill
+- [x] `cmd/legion`: Node startup sequence
 
 **Exit criteria**: 3-node cluster forms automatically on LAN; any node can resume a session after another node crashes.
+
+Verified on 2026-09-01 with Go 1.26.5 and `CGO_ENABLED=0`: three fresh
+`cmd/legion` processes elected one deterministic Bonjour bootstrap node, joined
+the other two as nonvoters then voters, accepted a store command through a
+follower, survived leader termination, and accepted/read another forwarded
+command after re-election. The repository-owned Rust fixtures prove direct and
+forced relay-only ALPN echo against Go (including selected-path inspection) and
+bidirectional `iroh-gossip` exchange of the exact Legion `NodePresence` JSON on
+the BLAKE3 `legion-cluster-v1` topic. `make go-check`, `make go-rust-interop`,
+`go mod verify`, uncached full tests, and five shuffled cluster/Raft runs pass.
 
 ---
 
