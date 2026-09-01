@@ -1,39 +1,38 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Legion Web Chat</title>
   <style>
-    :root{color-scheme:dark;font:16px/1.5 system-ui,sans-serif;background:#090d18;color:#eef2ff}
-    *{box-sizing:border-box}body{margin:0;padding:1.25rem}.app{width:min(52rem,100%);margin:auto}
-    header{display:flex;align-items:center;justify-content:space-between;gap:1rem}h1{font-size:1.35rem;margin:.5rem 0}
-    #status{font-size:.85rem;color:#fbbf24}#status.online{color:#86efac}#status.error{color:#fca5a5}
-    #log{height:min(65vh,38rem);overflow:auto;border:1px solid #273451;border-radius:.75rem;padding:1rem;background:#0d1424}
-    .message{margin:.65rem 0;padding:.7rem .85rem;border-radius:.7rem;white-space:pre-wrap;overflow-wrap:anywhere}
-    .user{margin-left:12%;background:#1d4ed8}.legion{margin-right:12%;background:#1e293b}.error{background:#7f1d1d}
-    form{display:flex;gap:.6rem;margin-top:.8rem}input{flex:1;min-width:0;padding:.8rem;border:1px solid #334155;border-radius:.6rem;background:#111827;color:inherit}
-    button{padding:.8rem 1.1rem;border:0;border-radius:.6rem;background:#2563eb;color:white;font-weight:650;cursor:pointer}button:disabled,input:disabled{opacity:.55}
-    footer{margin-top:.65rem;color:#94a3b8;font-size:.8rem}
+    :root{color-scheme:dark;font:16px/1.5 system-ui,sans-serif;background:#090d18;color:#eef2ff}*{box-sizing:border-box}
+    body{margin:0;padding:1.25rem}.app{width:min(58rem,100%);margin:auto}header{display:flex;align-items:center;justify-content:space-between;gap:1rem}h1{font-size:1.35rem;margin:.5rem 0}
+    #connection{font-size:.85rem;color:#fbbf24}#connection.online{color:#86efac}#connection.error{color:#fca5a5}
+    .model-state{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:.5rem;margin:.4rem 0 .8rem}.metric{padding:.55rem .7rem;background:#111827;border:1px solid #273451;border-radius:.55rem;min-width:0}.metric span{display:block;color:#94a3b8;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em}.metric strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.85rem}.working strong{color:#fbbf24}.idle strong{color:#86efac}
+    #log{height:min(62vh,36rem);overflow:auto;border:1px solid #273451;border-radius:.75rem;padding:1rem;background:#0d1424}.message{margin:.65rem 0;padding:.7rem .85rem;border-radius:.7rem;white-space:pre-wrap;overflow-wrap:anywhere}.user{margin-left:12%;background:#1d4ed8}.legion{margin-right:12%;background:#1e293b}.streaming::after{content:'▋';color:#60a5fa;animation:blink 1s steps(1) infinite}.error{background:#7f1d1d}@keyframes blink{50%{opacity:0}}
+    form{display:flex;gap:.6rem;margin-top:.8rem}input{flex:1;min-width:0;padding:.8rem;border:1px solid #334155;border-radius:.6rem;background:#111827;color:inherit}button{padding:.8rem 1.1rem;border:0;border-radius:.6rem;background:#2563eb;color:white;font-weight:650;cursor:pointer}button:disabled,input:disabled{opacity:.55}footer{margin-top:.65rem;color:#94a3b8;font-size:.8rem}
+    @media(max-width:42rem){.model-state{grid-template-columns:1fr 1fr}.model{grid-column:1/-1}.message.user,.message.legion{margin-left:0;margin-right:0}}
   </style>
 </head>
 <body><main class="app">
-  <header><h1>Legion Web Chat</h1><span id="status">Connecting…</span></header>
+  <header><h1>Legion Web Chat</h1><span id="connection">Connecting…</span></header>
+  <section class="model-state" aria-label="Model state">
+    <div class="metric model"><span>Model</span><strong id="model">—</strong></div>
+    <div class="metric idle" id="state-card"><span>State</span><strong id="state">Restoring</strong></div>
+    <div class="metric"><span>Elapsed</span><strong id="elapsed">—</strong></div>
+    <div class="metric"><span>Last turn</span><strong id="usage">—</strong></div>
+  </section>
   <section id="log" aria-live="polite"></section>
   <form><input autofocus autocomplete="off" placeholder="Message Legion…" disabled><button disabled>Send</button></form>
-  <footer>Conversation history is restored from a durable Legion session. This browser uses a free OpenCode model.</footer>
+  <footer>Responses stream over SSE. State feedback shows activity and usage, never hidden reasoning text. Conversations remain durable across reloads.</footer>
 </main>
 <script>
-const log=document.querySelector('#log'),input=document.querySelector('input'),button=document.querySelector('button'),status=document.querySelector('#status');
-const add=(kind,text)=>{const item=document.createElement('div');item.className=`message ${kind}`;item.textContent=text;log.append(item);log.scrollTop=log.scrollHeight};
-const setStatus=(text,kind='')=>{status.textContent=text;status.className=kind};
-const storedSession=localStorage.getItem('legion.webChat.session');
-const wsUrl=new URL(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`);
-if(storedSession)wsUrl.searchParams.set('session',storedSession);
-const ws=new WebSocket(wsUrl);
-ws.onopen=()=>setStatus('Restoring…');
-ws.onclose=()=>{setStatus('Disconnected','error');input.disabled=button.disabled=true};
-ws.onerror=()=>setStatus('Connection error','error');
-ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type==='ready'){localStorage.setItem('legion.webChat.session',m.sessionId);log.replaceChildren();for(const item of m.history)add(item.role,item.text);setStatus('Connected','online');input.disabled=button.disabled=false;input.focus();return}if(m.type==='error'||m.error){add('error',`Error: ${m.error}`);return}add('legion',m.text)};
-document.querySelector('form').onsubmit=e=>{e.preventDefault();const text=input.value.trim();if(!text||ws.readyState!==WebSocket.OPEN||input.disabled)return;add('user',text);ws.send(JSON.stringify({text}));input.value=''};
+const log=document.querySelector('#log'),input=document.querySelector('input'),button=document.querySelector('button'),connection=document.querySelector('#connection'),modelEl=document.querySelector('#model'),stateEl=document.querySelector('#state'),stateCard=document.querySelector('#state-card'),elapsedEl=document.querySelector('#elapsed'),usageEl=document.querySelector('#usage');
+let sessionId,eventSource,streamingMessage,startedAt,timer,busy=true;
+const add=(kind,text,extra='')=>{const item=document.createElement('div');item.className=`message ${kind} ${extra}`;item.textContent=text;log.append(item);log.scrollTop=log.scrollHeight;return item};
+const setConnection=(text,kind='')=>{connection.textContent=text;connection.className=kind};
+const setState=(state,start)=>{const labels={idle:'Idle',thinking:'Waiting for model',reasoning:'Reasoning',responding:'Responding',tool:'Using tool',error:'Error'};stateEl.textContent=labels[state]||state;busy=state!=='idle'&&state!=='error';stateCard.className=`metric ${busy?'working':'idle'}`;input.disabled=button.disabled=busy||!eventSource;if(start){startedAt=start;clearInterval(timer);timer=setInterval(()=>elapsedEl.textContent=`${((Date.now()-startedAt)/1000).toFixed(1)}s`,100)}if(!busy&&startedAt){clearInterval(timer);elapsedEl.textContent=`${((Date.now()-startedAt)/1000).toFixed(1)}s`;startedAt=undefined}if(!busy)input.focus()};
+function connectEvents(){eventSource?.close();eventSource=new EventSource(`/api/events?session=${encodeURIComponent(sessionId)}`);eventSource.onopen=()=>setConnection('SSE connected','online');eventSource.onerror=()=>setConnection('Reconnecting…','error');eventSource.onmessage=e=>{const m=JSON.parse(e.data);if(m.type==='state'){setState(m.state,m.startedAt);return}if(m.type==='text_delta'){setState('responding');if(!streamingMessage)streamingMessage=add('legion','','streaming');streamingMessage.textContent+=m.delta;log.scrollTop=log.scrollHeight;return}if(m.type==='tool_call'){setState('tool');return}if(m.type==='done'){if(!streamingMessage)streamingMessage=add('legion',m.content||'');else streamingMessage.textContent=m.content||streamingMessage.textContent;streamingMessage.classList.remove('streaming');streamingMessage=undefined;usageEl.textContent=`${m.tokens_in} in · ${m.tokens_out} out · ${(m.wall_ms/1000).toFixed(1)}s`;return}if(m.type==='budget_halt'){add('error',`Budget halted: ${m.budget_field}`);setState('error');return}if(m.type==='error'){add('error',`Error: ${m.message}`);setState('error')}}}
+async function initialize(){const stored=localStorage.getItem('legion.webChat.session');const response=await fetch(`/api/session${stored?`?session=${encodeURIComponent(stored)}`:''}`);if(!response.ok)throw Error(`Session initialization failed: ${response.status}`);const data=await response.json();sessionId=data.sessionId;localStorage.setItem('legion.webChat.session',sessionId);modelEl.textContent=data.model;modelEl.title=data.model;log.replaceChildren();for(const item of data.history)add(item.role,item.text);connectEvents()}
+document.querySelector('form').onsubmit=async e=>{e.preventDefault();const text=input.value.trim();if(!text||busy)return;add('user',text);input.value='';setState('thinking',Date.now());const response=await fetch('/api/messages',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sessionId,text})});if(!response.ok){const body=await response.json().catch(()=>({}));add('error',`Error: ${body.error||response.status}`);setState('error')}};
+initialize().catch(error=>{setConnection('Unavailable','error');add('error',`Error: ${error.message}`);setState('error')});
 </script></body></html>
