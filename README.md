@@ -102,3 +102,4 @@ Early design stage. See [docs/10-roadmap.md](docs/10-roadmap.md) for milestone p
 - [12 — Backup and Restore](docs/12-backup-restore.md)
 - [13 — Load Testing](docs/13-load-testing.md)
 - [14 — Agent Ecosystem](docs/14-agent-ecosystem.md)
+- [15 — Pure-Go Port Analysis](docs/15-go-port-analysis.md)
