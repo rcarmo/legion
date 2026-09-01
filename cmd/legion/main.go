@@ -14,8 +14,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rcarmo/legion/internal/agent"
 	"github.com/rcarmo/legion/internal/cluster"
+	"github.com/rcarmo/legion/internal/core"
+	legionns "github.com/rcarmo/legion/internal/namespace"
 	"github.com/rcarmo/legion/internal/raftstore"
+	"github.com/tmc/go-iroh/iroh"
 	"github.com/tmc/go-iroh/key"
 	"github.com/tmc/go-iroh/netaddr"
 )
@@ -28,10 +32,15 @@ func main() {
 	}
 }
 func run() error {
+	if handled, err := runCLI(os.Args[1:]); handled {
+		return err
+	}
 	dataDir := flag.String("data-dir", "./data", "persistent node state")
 	irohAddr := flag.String("iroh-addr", "[::]:0", "iroh UDP bind address")
 	raftAddr := flag.String("raft-addr", "127.0.0.1:7000", "stable Raft TCP address")
-	apiAddr := flag.String("api-addr", "127.0.0.1:8080", "cluster control HTTP address")
+	apiAddr := flag.String("api-addr", "127.0.0.1:8080", "cluster control and REST HTTP address")
+	ninepAddr := flag.String("9p-addr", "127.0.0.1:5640", "loopback 9P TCP address (empty disables)")
+	capability := flag.String("9p-capability", os.Getenv("LEGION_9P_CAPABILITY"), "9P attach capability token")
 	mdns := flag.Bool("mdns", true, "enable LAN discovery")
 	relay := flag.Bool("relay", true, "enable iroh relay transport")
 	discoveryWindow := flag.Duration("discovery-window", 3*time.Second, "Bonjour discovery window")
@@ -71,7 +80,17 @@ func run() error {
 	directory.Add(*raftAddr, *apiAddr)
 	directory.AddPeers(bootstrap.Peers)
 	routed := cluster.NewRoutedStore(store, directory)
-	server := &http.Server{Addr: *apiAddr, Handler: cluster.ControlServer{Store: store}.Handler(), ReadHeaderTimeout: 5 * time.Second}
+	tree := legionns.NewTree()
+	agentLoop := agent.New(routed, core.EchoToolRegistry{}, agent.GoAI{})
+	namespace := legionns.New(tree).WithResources(legionns.NewSessionResources(routed, agentLoop)).WithDeploy(legionns.TreeDeploy{Tree: tree}).WithCluster(legionns.LiveCluster{Node: node, Store: store, Tree: tree})
+	if *capability != "" {
+		namespace.WithCapability([]byte(*capability))
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/", legionns.REST{Namespace: namespace}.Handler())
+	mux.Handle("/raft/", cluster.ControlServer{Store: store}.Handler())
+	mux.Handle("/store", cluster.ControlServer{Store: store}.Handler())
+	server := &http.Server{Addr: *apiAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.ListenAndServe() }()
 	if target, joinErr := cluster.RaftJoinTarget(bootstrap); joinErr != nil {
@@ -88,12 +107,34 @@ func run() error {
 			bootstrapAddrs = append(bootstrapAddrs, netaddr.NewEndpointAddr(id))
 		}
 	}
-	membership, err := cluster.StartMembership(ctx, node, bootstrapAddrs, 5*time.Second, func(peer cluster.NodePresence) { log.Printf("peer joined: %s", peer.ShortID) }, func(peer string) { log.Printf("peer left: %s", peer) })
+	membership, err := cluster.StartMembershipWithProtocols(ctx, node, bootstrapAddrs, 5*time.Second, func(peer cluster.NodePresence) {
+		log.Printf("peer joined: %s", peer.ShortID)
+		if endpointID, parseErr := key.ParseEndpointID(peer.EndpointID); parseErr == nil {
+			namespace.RegisterPeer(peer.EndpointID, legionns.RemotePeer{Dial: func(callCtx context.Context) (*legionns.Client, error) {
+				return legionns.DialIroh(callCtx, node.Endpoint, netaddr.NewEndpointAddr(endpointID), *capability)
+			}})
+		}
+	}, func(peer string) {
+		log.Printf("peer left: %s", peer)
+		namespace.UnregisterPeer(peer)
+	}, map[string]iroh.ProtocolHandler{legionns.ALPN: namespace.Handler()})
 	if err != nil {
 		return err
 	}
 	defer membership.Close(context.Background())
-	log.Printf("legion %s node=%s raft=%d raft_addr=%s api=%s mode=%s", version, node.ShortID(), raftID, *raftAddr, *apiAddr, bootstrap.Kind)
+	if *ninepAddr != "" {
+		listener, listenErr := net.Listen("tcp", *ninepAddr)
+		if listenErr != nil {
+			return fmt.Errorf("9p listen: %w", listenErr)
+		}
+		defer listener.Close()
+		go func() {
+			if serveError := namespace.ServeTCP(ctx, listener); serveError != nil && ctx.Err() == nil {
+				log.Printf("9p server: %v", serveError)
+			}
+		}()
+	}
+	log.Printf("legion %s node=%s raft=%d raft_addr=%s api=%s 9p=%s mode=%s", version, node.ShortID(), raftID, *raftAddr, *apiAddr, *ninepAddr, bootstrap.Kind)
 	select {
 	case <-ctx.Done():
 		shutdownCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)

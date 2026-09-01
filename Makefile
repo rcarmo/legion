@@ -10,7 +10,7 @@ GO ?= go
 GO_TOOLCHAIN ?= go1.26.5
 GO_ENV := GOTOOLCHAIN=$(GO_TOOLCHAIN) CGO_ENABLED=0
 
-.PHONY: go-fmt go-fmt-check go-test go-test-core go-test-store go-test-agent go-vet go-check go-rust-interop \
+.PHONY: go-fmt go-fmt-check go-test go-test-core go-test-store go-test-agent go-vet go-check go-rust-interop go-ninep-interop \
 	help preflight postflight space build release test lint fmt fmt-check check verify-m3 \
 	clean clean-junk distclean docs dev server integration-test cli-integration-test \
 	wasm-fixture wasm-integration-test otel-integration-test backup-restore-drill bun-ninep-integration-test dashboard-integration-test js-test load-test load-test-http load-test-hiqlite server-release install uninstall test-core test-store test-loop \
@@ -58,6 +58,10 @@ go-check: preflight go-fmt-check
 go-rust-interop: preflight
 	$(CARGO) build -p legion-cluster --bin legion-interop-fixture --bin legion-gossip-interop-fixture
 	$(GO_ENV) $(GO) test -tags rustinterop -count=1 -timeout=120s -run 'TestRustGo(Direct|Relay|Gossip)' -v ./internal/cluster
+
+go-ninep-interop: preflight
+	$(CARGO) build -p legion-cluster --bin legion-ninep-interop-fixture
+	$(GO_ENV) $(GO) test -tags rustinterop -count=1 -timeout=60s -run TestRustGoNinePInterop -v ./internal/namespace
 
 preflight: clean-junk
 	@free_gb=$$(df -Pk "$(CURDIR)" | awk 'NR==2 {print int($$4/1024/1024)}'); \

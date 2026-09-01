@@ -79,15 +79,20 @@ the BLAKE3 `legion-cluster-v1` topic. `make go-check`, `make go-rust-interop`,
 
 **Goal**: All cluster resources accessible via 9P paths.
 
-- [ ] `internal/namespace`: `hugelgupf/p9` 9P2000.L integration
-  - [ ] `LegionNamespace` implementing the p9 server interfaces
-  - [ ] All Milestone 2 path handlers (see [07-9p-namespace.md](07-9p-namespace.md))
-  - [ ] Remote proxy (`/peers/<key>/...`) over authenticated iroh 9P RPC
-  - [ ] Streaming/blocking reads for `/sessions/<id>/turns`
-- [ ] `cmd/legion`: Expose namespace and gossip through one go-iroh QUIC endpoint
-- [ ] REST API shim on port 8080
-- [ ] CLI: `legion session`, `legion cluster`, `legion call`
-- [ ] Integration test: authenticated 9P read/write over go-iroh, including Rust interoperability and dynamic session resources
+- [x] `internal/namespace`: `hugelgupf/p9` 9P2000.L integration
+  - [x] `LegionNamespace` implementing the p9 server interfaces
+  - [x] All Milestone 2 path handlers (see [07-9p-namespace.md](07-9p-namespace.md))
+  - [x] Remote proxy (`/peers/<key>/...`) over authenticated iroh 9P RPC
+  - [x] Streaming/blocking reads for `/sessions/<id>/turns`
+- [x] `cmd/legion`: Expose namespace and gossip through one go-iroh QUIC endpoint
+- [x] REST API shim on port 8080
+- [x] CLI: `legion session`, `legion cluster`, `legion call`
+- [x] Integration test: authenticated 9P read/write over go-iroh, including Rust interoperability and dynamic session resources
+
+Completed in the Go port with a minimal vendored `hugelgupf/p9` extension that passes
+`Tattach.aname` to an optional named attacher (required for the Rust-compatible
+`cap=<token>` contract). `make go-check`, `make go-ninep-interop`, authenticated
+Go/iroh round trips, peer forwarding, blocking reads, and dynamic session tests pass.
 
 **Exit criteria**: A human can run a full agent session using only `9p read/write` shell commands.
 

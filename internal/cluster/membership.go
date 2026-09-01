@@ -31,8 +31,19 @@ type Membership struct {
 }
 
 func StartMembership(ctx context.Context, node *Node, bootstrap []netaddr.EndpointAddr, heartbeat time.Duration, onJoined func(NodePresence), onLeft func(string)) (*Membership, error) {
+	return StartMembershipWithProtocols(ctx, node, bootstrap, heartbeat, onJoined, onLeft, nil)
+}
+
+// StartMembershipWithProtocols serves gossip and application protocols through
+// one router on the node's shared iroh endpoint.
+func StartMembershipWithProtocols(ctx context.Context, node *Node, bootstrap []netaddr.EndpointAddr, heartbeat time.Duration, onJoined func(NodePresence), onLeft func(string), protocols map[string]iroh.ProtocolHandler) (*Membership, error) {
 	g := gossip.NewGossip(node.Endpoint)
-	router, err := iroh.NewRouter(node.Endpoint, map[string]iroh.ProtocolHandler{gossip.ALPN: g.Handler()}, nil)
+	handlers := make(map[string]iroh.ProtocolHandler, len(protocols)+1)
+	for alpn, handler := range protocols {
+		handlers[alpn] = handler
+	}
+	handlers[gossip.ALPN] = g.Handler()
+	router, err := iroh.NewRouter(node.Endpoint, handlers, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -2,11 +2,14 @@ module github.com/rcarmo/legion
 
 go 1.26.0
 
+replace github.com/hugelgupf/p9 => ./third_party/p9
+
 require (
 	github.com/google/uuid v1.6.0
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/hashicorp/raft v1.7.3
 	github.com/hashicorp/raft-boltdb/v2 v2.3.1
+	github.com/hugelgupf/p9 v0.4.1
 	github.com/rcarmo/go-ai v0.0.0-20260829144713-abd95ba55b58
 	github.com/tmc/go-iroh v0.1.1-0.20260831001212-d017bbf60c5a
 	lukechampine.com/blake3 v1.4.1
@@ -33,6 +36,7 @@ require (
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/quic-go/quic-go v0.59.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/u-root/uio v0.0.0-20230305220412-3e8cd9d6bf63 // indirect
 	go.etcd.io/bbolt v1.3.5 // indirect
 	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
