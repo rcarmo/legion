@@ -6,8 +6,12 @@ export CARGO_TARGET_DIR := $(CURDIR)/target
 CARGO ?= $(HOME)/.cargo/bin/cargo
 MIN_FREE_GB ?= 6
 TARGET_WARN_GB ?= 10
+GO ?= go
+GO_TOOLCHAIN ?= go1.26.5
+GO_ENV := GOTOOLCHAIN=$(GO_TOOLCHAIN) CGO_ENABLED=0
 
-.PHONY: help preflight postflight space build release test lint fmt fmt-check check verify-m3 \
+.PHONY: go-fmt go-fmt-check go-test go-test-core go-test-store go-test-agent go-vet go-check \
+	help preflight postflight space build release test lint fmt fmt-check check verify-m3 \
 	clean clean-junk distclean docs dev server integration-test cli-integration-test \
 	wasm-fixture wasm-integration-test otel-integration-test backup-restore-drill bun-ninep-integration-test dashboard-integration-test js-test load-test load-test-http load-test-hiqlite server-release install uninstall test-core test-store test-loop \
 	test-namespace test-deploy test-cluster test-ecosystem test-runtime-extism
@@ -21,7 +25,35 @@ help:
 	  '  make wasm-integration-test  Build server/fixture once, then smoke test' \
 	  '  make clean-junk          Remove temp files and accidental nested targets' \
 	  '  make clean               Remove Cargo build output' \
-	  '  make space               Show free space and build-tree size'
+	  '  make space               Show free space and build-tree size' \
+	  '  make go-check            Pure-Go format, vet, and test gate (CGO disabled)' \
+	  '  make go-test-core        Focused Go core contract tests' \
+	  '  make go-test-store       Focused pure-Go SQLite tests'
+
+go-fmt:
+	$(GO_ENV) $(GO) fmt ./internal/...
+
+go-fmt-check:
+	@test -z "$$(gofmt -l internal 2>/dev/null)" || { gofmt -l internal; exit 1; }
+
+go-test-core: preflight
+	$(GO_ENV) $(GO) test ./internal/core
+
+go-test-store: preflight
+	$(GO_ENV) $(GO) test ./internal/store
+
+go-test-agent: preflight
+	$(GO_ENV) $(GO) test ./internal/agent
+
+go-test: preflight
+	$(GO_ENV) $(GO) test ./...
+
+go-vet: preflight
+	$(GO_ENV) $(GO) vet ./...
+
+go-check: preflight go-fmt-check
+	$(GO_ENV) $(GO) vet ./...
+	$(GO_ENV) $(GO) test ./...
 
 preflight: clean-junk
 	@free_gb=$$(df -Pk "$(CURDIR)" | awk 'NR==2 {print int($$4/1024/1024)}'); \
