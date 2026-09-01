@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -32,6 +33,31 @@ func TestRustCompatibleEventJSON(t *testing.T) {
 		t.Fatalf("roundtrip: %#v", round)
 	}
 }
+func TestHashEnvelopeMatchesRustGoldenVector(t *testing.T) {
+	envelope := TurnEnvelope{
+		RunID: uuid.Nil, Seq: 7, Event: NewUserMessage("hello"), CreatedAt: 1_700_000_000_000,
+	}
+	hash := HashEnvelope(envelope)
+	got := hex.EncodeToString(hash[:])
+	const want = "4b44647ff56102406c2e2af6878b8e13933c6b4c55f6e698dec8e7429b5480f1"
+	if got != want {
+		t.Fatalf("Rust hash mismatch: got %s want %s", got, want)
+	}
+}
+
+func TestCanonicalHashRetainsLargePayloadIntegers(t *testing.T) {
+	event := NewUserMessage("hello")
+	event.Payload = json.RawMessage(`{"value":9007199254740993}`)
+	envelope := TurnEnvelope{Seq: 1, Event: event, CreatedAt: 1}
+	first := HashEnvelope(envelope)
+	event.Payload = json.RawMessage(`{"value":9007199254740992}`)
+	envelope.Event = event
+	second := HashEnvelope(envelope)
+	if first == second {
+		t.Fatal("canonical hash rounded distinct large integers")
+	}
+}
+
 func TestBudgetOrderAndTerminalStatus(t *testing.T) {
 	s := BudgetState{Turns: 1, ToolCalls: 1}
 	if got := s.ExceededBy(Budget{MaxTurns: ptr(uint32(1)), MaxToolCalls: ptr(uint32(1))}); got != "max_turns" {

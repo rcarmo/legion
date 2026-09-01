@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/google/uuid v1.6.0
+	github.com/rcarmo/go-ai v0.0.0-20260829144713-abd95ba55b58
 	modernc.org/sqlite v1.40.1
 )
 

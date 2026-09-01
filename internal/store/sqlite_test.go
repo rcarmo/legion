@@ -63,6 +63,28 @@ func TestSQLiteAppendPersistRecentStatusAndFork(t *testing.T) {
 		t.Fatalf("list=%#v err=%v", list, err)
 	}
 }
+func TestSQLiteStatusFilterAppliesBeforePagination(t *testing.T) {
+	ctx := context.Background()
+	s, err := OpenMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, status := range []core.SessionStatus{core.StatusRunning, core.StatusCompleted, core.StatusRunning} {
+		id := uuid.New()
+		if err = s.CreateSession(ctx, id, cfg()); err != nil {
+			t.Fatal(err)
+		}
+		if err = s.SetStatus(ctx, id, status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list, err := s.ListSessions(ctx, core.SessionFilter{Status: "completed", Limit: 1})
+	if err != nil || len(list) != 1 || list[0].Status.Status != "completed" {
+		t.Fatalf("list=%#v err=%v", list, err)
+	}
+}
+
 func TestSQLiteRejectsMissingAndOutOfRangeFork(t *testing.T) {
 	ctx := context.Background()
 	s, err := OpenMemory()

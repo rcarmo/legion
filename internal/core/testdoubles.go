@@ -117,7 +117,10 @@ func (s *MemoryEventStore) ListSessions(_ context.Context, f SessionFilter) ([]S
 		if f.Status != "" && v.Status.Status != f.Status {
 			continue
 		}
-		out = append(out, SessionSummary{id, v.Status, v.Config.Model, uint64(len(v.Log)), v.CreatedAt, v.UpdatedAt})
+		out = append(out, SessionSummary{
+			RunID: id, Status: v.Status, Model: v.Config.Model, Turns: uint64(len(v.Log)),
+			CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt,
+		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
 	start := f.Offset

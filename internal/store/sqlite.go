@@ -199,7 +199,15 @@ func (s *SQLiteStore) ListSessions(ctx context.Context, f core.SessionFilter) ([
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT s.run_id,s.status,s.config,s.created_at,s.updated_at,(SELECT COUNT(*) FROM turns t WHERE t.run_id=s.run_id) FROM sessions s ORDER BY s.created_at DESC LIMIT ? OFFSET ?`, limit, f.Offset)
+	query := `SELECT s.run_id,s.status,s.config,s.created_at,s.updated_at,(SELECT COUNT(*) FROM turns t WHERE t.run_id=s.run_id) FROM sessions s`
+	args := []any{}
+	if f.Status != "" {
+		query += ` WHERE json_extract(s.status, '$.status') = ?`
+		args = append(args, f.Status)
+	}
+	query += ` ORDER BY s.created_at DESC LIMIT ? OFFSET ?`
+	args = append(args, limit, f.Offset)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -217,11 +225,11 @@ func (s *SQLiteStore) ListSessions(ctx context.Context, f core.SessionFilter) ([
 		if json.Unmarshal(stb, &st) != nil || json.Unmarshal(cfgb, &cfg) != nil {
 			continue
 		}
-		if f.Status != "" && st.Status != f.Status {
-			continue
-		}
 		id, _ := uuid.Parse(rid)
-		out = append(out, core.SessionSummary{id, st, cfg.Model, uint64(turns), c, u})
+		out = append(out, core.SessionSummary{
+			RunID: id, Status: st, Model: cfg.Model, Turns: uint64(turns),
+			CreatedAt: c, UpdatedAt: u,
+		})
 	}
 	return out, rows.Err()
 }

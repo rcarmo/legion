@@ -8,30 +8,37 @@ Go-port checklist reset on 2026-09-01. Rust implementation evidence remains in `
 
 **Goal**: Go package skeleton, core interfaces, and single-node turn store working end-to-end.
 
-- [ ] Go 1.26 module scaffold with pure-Go package boundaries and `CGO_ENABLED=0` gates
-- [ ] `internal/core`: types + interfaces (no I/O)
-  - [ ] `TurnEvent`, `TurnEnvelope`, `RunId`, `SeqNum`, `SessionStatus`
-  - [ ] `EventStore` interface
-  - [ ] `AgentLoop` interface (4 verbs: start, recover, resume, resolve)
-  - [ ] `ToolRegistry` interface
-  - [ ] `Budget`, `RunConfig`, `TurnPhase`
-  - [ ] Test doubles (`MemoryEventStore`, `EchoToolRegistry`)
-- [ ] `internal/store`: pure-Go SQLite-backed `EventStore` (single-node, no Raft yet)
-  - [ ] `modernc.org/sqlite` (or benchmark-proven pure-Go alternative) + WAL mode
-  - [ ] Migrations: `0001_initial.sql`, `0002_functions.sql`
-  - [ ] Hash chain implementation
-  - [ ] `read_log` with chain verification
-  - [ ] `fork` implementation
-- [ ] `internal/agent`: Basic agent loop on `rcarmo/go-ai`
-  - [ ] `TurnPhase` state machine
-  - [ ] go-ai event-channel integration
-  - [ ] Write-ahead intent logging
-  - [ ] Effect classification
-  - [ ] Budget enforcement
-  - [ ] Crash recovery from log
-- [ ] Unit tests for loop + store with deterministic Go test doubles
+- [x] Go 1.26 module scaffold with pure-Go package boundaries and `CGO_ENABLED=0` gates
+- [x] `internal/core`: types + interfaces (no I/O)
+  - [x] `TurnEvent`, `TurnEnvelope`, `RunId`, `SeqNum`, `SessionStatus`
+  - [x] `EventStore` interface
+  - [x] `AgentLoop` interface (4 verbs: start, recover, resume, resolve)
+  - [x] `ToolRegistry` interface
+  - [x] `Budget`, `RunConfig`, `TurnPhase`
+  - [x] Test doubles (`MemoryEventStore`, `EchoToolRegistry`)
+- [x] `internal/store`: pure-Go SQLite-backed `EventStore` (single-node, no Raft yet)
+  - [x] `modernc.org/sqlite` (or benchmark-proven pure-Go alternative) + WAL mode
+  - [x] Migrations: `0001_initial.sql`, `0002_functions.sql`
+  - [x] Hash chain implementation
+  - [x] `read_log` with chain verification
+  - [x] `fork` implementation
+- [x] `internal/agent`: Basic agent loop on `rcarmo/go-ai`
+  - [x] `TurnPhase` state machine
+  - [x] go-ai event-channel integration
+  - [x] Write-ahead intent logging
+  - [x] Effect classification
+  - [x] Budget enforcement
+  - [x] Crash recovery from log
+- [x] Unit tests for loop + store with deterministic Go test doubles
 
 **Exit criteria**: An agent session can run to completion and be replayed from the event log on a single node.
+
+Verified on 2026-09-01 with Go 1.26.5 and `CGO_ENABLED=0`: `make go-check`,
+`go mod verify`, and an uncached `go test -count=1 ./...` pass. The end-to-end
+SQLite test runs a tool-using session to completion, closes and reopens the
+database, verifies and reconstructs the complete event chain, then recovers the
+terminal session without inference. A Rust-generated golden vector also fixes
+the mixed-language event-envelope hash contract.
 
 ---
 
