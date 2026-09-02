@@ -37,6 +37,37 @@ func TestMaterializedEnvelopeRequiresExactSequenceAndHash(t *testing.T) {
 	}
 }
 
+func TestMaterializedBatchIsAtomicAndPreservesChain(t *testing.T) {
+	ctx := context.Background()
+	s, err := OpenMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	id := uuid.New()
+	if err = s.ApplyCreate(ctx, id, cfg(), 10); err != nil {
+		t.Fatal(err)
+	}
+	first := core.TurnEnvelope{RunID: id, Seq: 0, Event: core.NewUserMessage("first"), CreatedAt: 11}
+	second := core.TurnEnvelope{RunID: id, Seq: 1, PrevHash: core.HashEnvelope(first), Event: core.NewUserMessage("second"), CreatedAt: 12}
+	if err = s.ApplyEnvelopes(ctx, []core.TurnEnvelope{first, second}); err != nil {
+		t.Fatal(err)
+	}
+	log, err := s.ReadLog(ctx, id)
+	if err != nil || len(log) != 2 {
+		t.Fatalf("log=%#v err=%v", log, err)
+	}
+	badFirst := core.TurnEnvelope{RunID: id, Seq: 2, PrevHash: core.HashEnvelope(second), Event: core.NewUserMessage("third"), CreatedAt: 13}
+	badSecond := core.TurnEnvelope{RunID: id, Seq: 4, PrevHash: core.HashEnvelope(badFirst), Event: core.NewUserMessage("bad"), CreatedAt: 14}
+	if err = s.ApplyEnvelopes(ctx, []core.TurnEnvelope{badFirst, badSecond}); err == nil {
+		t.Fatal("invalid batch accepted")
+	}
+	log, err = s.ReadLog(ctx, id)
+	if err != nil || len(log) != 2 {
+		t.Fatalf("invalid batch was not atomic: log=%#v err=%v", log, err)
+	}
+}
+
 func TestMaterializedSnapshotRestorePreservesForkAndChain(t *testing.T) {
 	ctx := context.Background()
 	s, err := OpenMemory()

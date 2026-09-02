@@ -47,9 +47,45 @@ func (s *SQLiteStore) ApplyCreate(ctx context.Context, id core.RunID, config cor
 	return err
 }
 
+// EnvelopeTail returns the next sequence and predecessor hash without scanning
+// the full session log. Raft's serialized FSM uses this to derive append batches
+// in O(1) with respect to existing history.
+func (s *SQLiteStore) EnvelopeTail(ctx context.Context, id core.RunID) (core.SeqNum, [32]byte, error) {
+	var previous [32]byte
+	var exists int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions WHERE run_id=?`, id.String()).Scan(&exists); err != nil {
+		return 0, previous, err
+	}
+	if exists == 0 {
+		return 0, previous, core.ErrSessionNotFound
+	}
+	var next uint64
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq)+1,0) FROM turns WHERE run_id=?`, id.String()).Scan(&next); err != nil {
+		return 0, previous, err
+	}
+	if next > 0 {
+		last, err := loadTurn(ctx, s.db, id, core.SeqNum(next-1))
+		if err != nil {
+			return 0, previous, err
+		}
+		previous = core.HashEnvelope(last)
+	}
+	return core.SeqNum(next), previous, nil
+}
+
 // ApplyEnvelope inserts a leader-generated envelope after validating sequence
 // and predecessor hash against the local materialized state.
 func (s *SQLiteStore) ApplyEnvelope(ctx context.Context, envelope core.TurnEnvelope) error {
+	return s.ApplyEnvelopes(ctx, []core.TurnEnvelope{envelope})
+}
+
+// ApplyEnvelopes applies one hash-chained batch in a single SQLite transaction.
+// The Raft command still carries typed events, so every voter deterministically
+// derives and validates the same envelopes rather than replicating arbitrary SQL.
+func (s *SQLiteStore) ApplyEnvelopes(ctx context.Context, envelopes []core.TurnEnvelope) error {
+	if len(envelopes) == 0 {
+		return nil
+	}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -57,37 +93,66 @@ func (s *SQLiteStore) ApplyEnvelope(ctx context.Context, envelope core.TurnEnvel
 		return err
 	}
 	defer tx.Rollback()
+	runID := envelopes[0].RunID
 	var count uint64
-	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM turns WHERE run_id=?`, envelope.RunID.String()).Scan(&count); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM turns WHERE run_id=?`, runID.String()).Scan(&count); err != nil {
 		return err
 	}
-	if core.SeqNum(count) != envelope.Seq {
-		return fmt.Errorf("materialized sequence mismatch: got %d want %d", envelope.Seq, count)
-	}
 	var previous [32]byte
-	if envelope.Seq > 0 {
-		last, loadErr := loadTurn(ctx, tx, envelope.RunID, envelope.Seq-1)
+	if count > 0 {
+		last, loadErr := loadTurn(ctx, tx, runID, core.SeqNum(count-1))
 		if loadErr != nil {
 			return loadErr
 		}
 		previous = core.HashEnvelope(last)
 	}
-	if previous != envelope.PrevHash {
-		return fmt.Errorf("materialized predecessor mismatch at %d", envelope.Seq)
+	const maxRowsPerInsert = 100
+	var values strings.Builder
+	args := make([]any, 0, maxRowsPerInsert*11)
+	flush := func() error {
+		if len(args) == 0 {
+			return nil
+		}
+		_, flushErr := tx.ExecContext(ctx, `INSERT INTO turns(run_id,seq,prev_hash,kind,payload,payload_cid,model,tokens_in,tokens_out,wall_ms,created_at) VALUES `+values.String(), args...)
+		values.Reset()
+		args = args[:0]
+		return flushErr
 	}
-	kind, err := json.Marshal(envelope.Event.Kind)
-	if err != nil {
+	for index, envelope := range envelopes {
+		want := core.SeqNum(count + uint64(index))
+		if envelope.RunID != runID {
+			return fmt.Errorf("materialized batch mixes run ids")
+		}
+		if envelope.Seq != want {
+			return fmt.Errorf("materialized sequence mismatch: got %d want %d", envelope.Seq, want)
+		}
+		if envelope.PrevHash != previous {
+			return fmt.Errorf("materialized predecessor mismatch at %d", envelope.Seq)
+		}
+		kind, marshalErr := json.Marshal(envelope.Event.Kind)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		var payload any
+		if envelope.Event.Payload != nil {
+			payload = string(envelope.Event.Payload)
+		}
+		if len(args) > 0 {
+			values.WriteByte(',')
+		}
+		values.WriteString(`(?,?,?,?,?,?,?,?,?,?,?)`)
+		args = append(args, envelope.RunID.String(), envelope.Seq, envelope.PrevHash[:], kind, payload, envelope.Event.PayloadCID, envelope.Event.Model, envelope.Event.TokensIn, envelope.Event.TokensOut, envelope.Event.WallMS, envelope.CreatedAt)
+		if (index+1)%maxRowsPerInsert == 0 {
+			if err = flush(); err != nil {
+				return err
+			}
+		}
+		previous = core.HashEnvelope(envelope)
+	}
+	if err = flush(); err != nil {
 		return err
 	}
-	var payload any
-	if envelope.Event.Payload != nil {
-		payload = string(envelope.Event.Payload)
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO turns(run_id,seq,prev_hash,kind,payload,payload_cid,model,tokens_in,tokens_out,wall_ms,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, envelope.RunID.String(), envelope.Seq, envelope.PrevHash[:], kind, payload, envelope.Event.PayloadCID, envelope.Event.Model, envelope.Event.TokensIn, envelope.Event.TokensOut, envelope.Event.WallMS, envelope.CreatedAt)
-	if err != nil {
-		return err
-	}
-	if _, err = tx.ExecContext(ctx, `UPDATE sessions SET updated_at=? WHERE run_id=?`, envelope.CreatedAt, envelope.RunID.String()); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE sessions SET updated_at=? WHERE run_id=?`, envelopes[len(envelopes)-1].CreatedAt, runID.String()); err != nil {
 		return err
 	}
 	return tx.Commit()

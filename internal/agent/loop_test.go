@@ -193,6 +193,47 @@ func TestRecoveryClassifiesInterruptedEffects(t *testing.T) {
 		t.Fatal(st)
 	}
 }
+func TestReconcileSkipAndRetry(t *testing.T) {
+	for _, action := range []string{"skip", "retry"} {
+		t.Run(action, func(t *testing.T) {
+			ctx := context.Background()
+			store := core.NewMemoryEventStore()
+			loop := New(store, core.EchoToolRegistry{}, &scripted{})
+			id, _ := loop.Start(ctx, config(core.Budget{}))
+			_, _ = store.Append(ctx, id, core.ToolCallIntent("echo", "dangling", core.EffectWrite, map[string]any{"message": "again"}))
+			if err := loop.Recover(ctx, id); !errors.Is(err, core.ErrPendingReconciliation) {
+				t.Fatal(err)
+			}
+			if err := loop.Reconcile(ctx, id, action); err != nil {
+				t.Fatal(err)
+			}
+			status, _ := store.SessionStatus(ctx, id)
+			if status != core.StatusIdle {
+				t.Fatal(status)
+			}
+			log, _ := store.ReadLog(ctx, id)
+			got := kinds(log)
+			if got[len(got)-2] != "tool_result" || got[len(got)-1] != "tool_call_reconciled" {
+				t.Fatal(got)
+			}
+		})
+	}
+}
+func TestReconcileRetryRejectsLegacyIntent(t *testing.T) {
+	ctx := context.Background()
+	store := core.NewMemoryEventStore()
+	loop := New(store, core.EchoToolRegistry{}, &scripted{})
+	id, _ := loop.Start(ctx, config(core.Budget{}))
+	_, _ = store.Append(ctx, id, core.TurnEvent{Kind: core.EventKind{Kind: "tool_call_intent", ToolName: "echo", CallID: "legacy"}})
+	_ = loop.Recover(ctx, id)
+	if err := loop.Reconcile(ctx, id, "retry"); err == nil {
+		t.Fatal("legacy retry accepted")
+	}
+	status, _ := store.SessionStatus(ctx, id)
+	if status.Status != "pending_reconciliation" {
+		t.Fatal(status)
+	}
+}
 func TestSQLiteSessionCompletesAndReplaysAfterReopen(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "legion.db")

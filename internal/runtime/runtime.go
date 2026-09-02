@@ -4,6 +4,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -99,8 +100,32 @@ type Result struct {
 type Invoker interface {
 	Invoke(context.Context, Request) (Result, error)
 }
+type InvocationObserver interface{ Record(string, uint64, bool) }
+type rejectionObserver interface{ Reject() }
+type ObservedInvoker struct {
+	Inner    Invoker
+	Observer InvocationObserver
+}
+
+func (o ObservedInvoker) Invoke(ctx context.Context, req Request) (result Result, err error) {
+	result, err = o.Inner.Invoke(ctx, req)
+	if o.Observer != nil {
+		o.Observer.Record(req.FunctionName, result.WallMS, err != nil || result.Error != "")
+		var limit LimitError
+		if errors.As(err, &limit) && (limit.Kind == LimitRate || limit.Kind == LimitBusy) {
+			if observer, ok := o.Observer.(rejectionObserver); ok {
+				observer.Reject()
+			}
+		}
+	}
+	return
+}
+
 type ArtifactSource interface {
 	Fetch(context.Context, string) ([]byte, error)
+}
+type CachedArtifactSource interface {
+	CachedPath(context.Context, string, string) (string, error)
 }
 type Namespace interface {
 	Read(context.Context, string) ([]byte, error)
@@ -113,8 +138,10 @@ type Limits struct {
 	MaxInputBytes            int
 	MaxOutputBytes           int
 	MaxConcurrentPerFunction int
+	MaxRequestsPerWindow     int
+	RateWindow               time.Duration
 }
 
 func DefaultLimits() Limits {
-	return Limits{Timeout: 30 * time.Second, MaxMemoryBytes: 64 << 20, MaxInputBytes: 1 << 20, MaxOutputBytes: 4 << 20, MaxConcurrentPerFunction: 8}
+	return Limits{Timeout: 30 * time.Second, MaxMemoryBytes: 64 << 20, MaxInputBytes: 1 << 20, MaxOutputBytes: 4 << 20, MaxConcurrentPerFunction: 8, MaxRequestsPerWindow: 120, RateWindow: time.Minute}
 }

@@ -1,5 +1,5 @@
 [Unit]
-Description=Legion durable agent and function node
+Description=Legion durable agent and function node (Go)
 Documentation=https://github.com/rcarmo/legion
 Wants=network-online.target
 After=network-online.target
@@ -10,10 +10,9 @@ StartLimitBurst=5
 Type=simple
 User=legion
 Group=legion
-WorkingDirectory=/etc/legion
-Environment=LEGION_CONFIG=/etc/legion/legion.toml
+WorkingDirectory=/var/lib/legion
 EnvironmentFile=-/etc/legion/legion.env
-ExecStart=/usr/local/bin/legion serve
+ExecStart=/usr/local/bin/legion --data-dir /var/lib/legion --iroh-addr [::]:0 --raft-addr 0.0.0.0:17001 --api-addr 0.0.0.0:8080 --9p-addr 127.0.0.1:5640
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s
@@ -25,8 +24,9 @@ UMask=0027
 LimitNOFILE=65536
 TasksMax=4096
 
-# JIT runtimes need executable writable memory, so MemoryDenyWriteExecute is
-# deliberately omitted. Everything else remains read-only outside state/tmp.
+# WASM and supervised function runtimes need executable writable memory, so
+# MemoryDenyWriteExecute is deliberately omitted. The daemon runs without
+# ambient privileges and can only write its managed state and private /tmp.
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true

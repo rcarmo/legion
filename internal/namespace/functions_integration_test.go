@@ -29,14 +29,15 @@ func runtimeNamespace(t *testing.T) (*LegionNamespace, func()) {
 	if jokerBin == "" {
 		jokerBin = "joker"
 	}
-	functions := legionruntime.Functions{Registry: registry, WASM: legionruntime.NewBoundedInvoker(wasm, limits), Bun: legionruntime.NewBoundedInvoker(bunruntime.New("", registry.CAS(), limits), limits), Joker: legionruntime.NewBoundedInvoker(joker.New(jokerBin, registry.CAS(), limits), limits)}
+	bun := bunruntime.New("", registry.CAS(), limits)
+	functions := legionruntime.Functions{Registry: registry, WASM: legionruntime.NewBoundedInvoker(wasm, limits), Bun: legionruntime.NewBoundedInvoker(bun, limits), Joker: legionruntime.NewBoundedInvoker(joker.New(jokerBin, registry.CAS(), limits), limits)}
 	tree := NewTree()
 	resources := deploy.Resources{Registry: registry, OnRegister: func(manifest legionruntime.Manifest) {
 		tree.EnsureDir("/fn/" + manifest.Name)
 		_ = tree.SetJSON("/fn/"+manifest.Name+"/manifest.json", manifest)
 	}}
 	ns := New(tree).WithDeploy(resources).WithFunctions(functions)
-	return ns, func() { _ = wasm.Close(context.Background()) }
+	return ns, func() { _ = bun.Close(); _ = wasm.Close(context.Background()) }
 }
 func deployAndCall(t *testing.T, ns *LegionNamespace, job deploy.Job, want string) {
 	t.Helper()

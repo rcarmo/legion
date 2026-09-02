@@ -129,7 +129,7 @@ func peerPath(p string) (string, string, bool) {
 }
 func virtual(p string) bool {
 	v := parts(p)
-	return len(v) == 2 && ((v[0] == "sessions" && v[1] == "new") || (v[0] == "deploy" && (v[1] == "push" || v[1] == "register" || v[1] == "route" || v[1] == "promote"))) || len(v) == 3 && ((v[0] == "sessions" && (v[2] == "turns" || v[2] == "status" || v[2] == "context" || v[2] == "fork" || v[2] == "config")) || (v[0] == "fn" && (v[2] == "schema" || v[2] == "versions" || v[2] == "default" || v[2] == "manifest.json")) || (v[0] == "deploy" && v[1] == "blobs") || (v[0] == "cluster" && (v[2] == "leader" || v[2] == "health" || v[2] == "self")))
+	return len(v) == 2 && ((v[0] == "sessions" && v[1] == "new") || (v[0] == "deploy" && (v[1] == "push" || v[1] == "register" || v[1] == "route" || v[1] == "promote"))) || len(v) == 3 && ((v[0] == "sessions" && (v[2] == "turns" || v[2] == "status" || v[2] == "context" || v[2] == "fork" || v[2] == "config" || v[2] == "reconcile")) || (v[0] == "fn" && (v[2] == "schema" || v[2] == "versions" || v[2] == "default" || v[2] == "manifest.json")) || (v[0] == "deploy" && v[1] == "blobs") || (v[0] == "cluster" && (v[2] == "leader" || v[2] == "health" || v[2] == "self")))
 }
 func (n *LegionNamespace) read(ctx context.Context, p string) ([]byte, error) {
 	n.mu.RLock()

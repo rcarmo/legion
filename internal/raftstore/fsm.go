@@ -38,18 +38,19 @@ func (f *fsm) Apply(log *raft.Log) any {
 			result.Err = fmt.Errorf("append command missing event")
 			break
 		}
-		var log []core.TurnEnvelope
-		log, result.Err = f.materialized.ReadLog(ctx, cmd.RunID)
-		if result.Err != nil {
+		result = f.applyEvents(ctx, cmd, []core.TurnEvent{*cmd.Event})
+	case commandAppendBatch:
+		if len(cmd.Events) == 0 {
+			result.Err = fmt.Errorf("append batch command missing events")
 			break
 		}
-		result.Seq = core.SeqNum(len(log))
-		var previous [32]byte
-		if result.Seq > 0 {
-			previous = core.HashEnvelope(log[len(log)-1])
+		result = f.applyEvents(ctx, cmd, cmd.Events)
+	case commandLoadBatch:
+		if len(cmd.LoadRows) == 0 {
+			result.Err = fmt.Errorf("load batch command missing rows")
+			break
 		}
-		envelope := core.TurnEnvelope{RunID: cmd.RunID, Seq: result.Seq, PrevHash: previous, Event: *cmd.Event, CreatedAt: cmd.Timestamp}
-		result.Err = f.materialized.ApplyEnvelope(ctx, envelope)
+		result.Err = f.materialized.ApplyLoadRows(ctx, cmd.LoadFirst, cmd.LoadRows)
 	case commandStatus:
 		if cmd.Status == nil {
 			result.Err = fmt.Errorf("status command missing status")
@@ -72,6 +73,23 @@ func (f *fsm) Apply(log *raft.Log) any {
 		default:
 		}
 	}
+	return result
+}
+
+func (f *fsm) applyEvents(ctx context.Context, cmd command, events []core.TurnEvent) applyResult {
+	result := applyResult{RunID: cmd.RunID}
+	var previous [32]byte
+	result.Seq, previous, result.Err = f.materialized.EnvelopeTail(ctx, cmd.RunID)
+	if result.Err != nil {
+		return result
+	}
+	envelopes := make([]core.TurnEnvelope, len(events))
+	for index, event := range events {
+		envelope := core.TurnEnvelope{RunID: cmd.RunID, Seq: result.Seq + core.SeqNum(index), PrevHash: previous, Event: event, CreatedAt: cmd.Timestamp + int64(index)}
+		envelopes[index] = envelope
+		previous = core.HashEnvelope(envelope)
+	}
+	result.Err = f.materialized.ApplyEnvelopes(ctx, envelopes)
 	return result
 }
 

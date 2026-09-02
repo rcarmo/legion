@@ -157,6 +157,32 @@ func TestThreeNodeSessionSurvivesLeaderKillAndRejoin(t *testing.T) {
 	}
 }
 
+func TestAppendBatchReplicatesOneHashChainedTransaction(t *testing.T) {
+	ctx := context.Background()
+	node := openTestStore(t, "1", t.TempDir(), reserveAddress(t), true)
+	defer node.Close()
+	waitLeader(t, map[string]*Store{"1": node}, "")
+	id := uuid.New()
+	if err := node.CreateSession(ctx, id, core.RunConfig{Model: "faux/batch"}); err != nil {
+		t.Fatal(err)
+	}
+	events := make([]core.TurnEvent, 500)
+	for index := range events {
+		events[index] = core.NewUserMessage(fmt.Sprintf("event-%d", index))
+	}
+	seq, err := node.AppendBatch(ctx, id, events)
+	if err != nil || seq != 0 {
+		t.Fatalf("seq=%d err=%v", seq, err)
+	}
+	log, err := node.ReadLog(ctx, id)
+	if err != nil || len(log) != len(events) {
+		t.Fatalf("len=%d err=%v", len(log), err)
+	}
+	if err = core.VerifyChain(log, id); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNotificationsReportAppliedCommands(t *testing.T) {
 	node := openTestStore(t, "1", t.TempDir(), reserveAddress(t), true)
 	defer node.Close()

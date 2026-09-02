@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 )
@@ -30,6 +31,47 @@ func TestBoundedInvokerLimits(t *testing.T) {
 	}
 	if _, e := b.Invoke(context.Background(), Request{FunctionName: "f", Args: json.RawMessage(`{"x":1}`)}); e == nil {
 		t.Fatal("expected input limit")
+	}
+}
+
+type observed struct{ calls, rejects int }
+
+func (o *observed) Record(string, uint64, bool) { o.calls++ }
+func (o *observed) Reject()                     { o.rejects++ }
+
+func TestObservedInvokerCountsLoadShedding(t *testing.T) {
+	limits := DefaultLimits()
+	limits.MaxRequestsPerWindow = 1
+	inner := NewBoundedInvoker(fakeInvoker{output: json.RawMessage(`{}`)}, limits)
+	observer := &observed{}
+	invoker := ObservedInvoker{Inner: inner, Observer: observer}
+	req := Request{FunctionName: "echo", Args: json.RawMessage(`{}`)}
+	if _, err := invoker.Invoke(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := invoker.Invoke(context.Background(), req); err == nil {
+		t.Fatal("rate-limited invocation accepted")
+	}
+	if observer.calls != 2 || observer.rejects != 1 {
+		t.Fatalf("calls=%d rejects=%d", observer.calls, observer.rejects)
+	}
+}
+
+func TestBoundedInvokerRateLimit(t *testing.T) {
+	l := DefaultLimits()
+	l.MaxRequestsPerWindow = 1
+	l.RateWindow = time.Minute
+	b := NewBoundedInvoker(fakeInvoker{output: json.RawMessage(`{}`)}, l)
+	if _, err := b.Invoke(context.Background(), Request{FunctionName: "f", Args: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := b.Invoke(context.Background(), Request{FunctionName: "f", Args: json.RawMessage(`{}`)})
+	var limit LimitError
+	if !errors.As(err, &limit) || limit.Kind != LimitRate || limit.RetryAfter <= 0 {
+		t.Fatalf("error=%v", err)
+	}
+	if _, err = b.Invoke(context.Background(), Request{FunctionName: "other", Args: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
 	}
 }
 func TestBoundedInvokerTimeoutAndConcurrency(t *testing.T) {

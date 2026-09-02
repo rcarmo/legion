@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	goai "github.com/rcarmo/go-ai"
 	"github.com/rcarmo/legion/internal/core"
+	legiontelemetry "github.com/rcarmo/legion/internal/telemetry"
+	"go.opentelemetry.io/otel/codes"
 )
 
 type Loop struct {
@@ -17,13 +19,23 @@ type Loop struct {
 	tools         core.ToolRegistry
 	inference     Inference
 	contextWindow int
+	telemetry     legiontelemetry.Instruments
 }
 
 func New(store core.EventStore, tools core.ToolRegistry, inference Inference) *Loop {
-	return &Loop{store: store, tools: tools, inference: inference, contextWindow: 40}
+	instruments, _ := legiontelemetry.NewInstruments()
+	return &Loop{store: store, tools: tools, inference: inference, contextWindow: 40, telemetry: instruments}
 }
-func (l *Loop) Start(ctx context.Context, c core.RunConfig) (core.RunID, error) {
-	id := uuid.New()
+func (l *Loop) Start(ctx context.Context, c core.RunConfig) (id core.RunID, err error) {
+	ctx, span := legiontelemetry.Tracer().Start(ctx, "agent.start")
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+	id = uuid.New()
 	if err := l.store.CreateSession(ctx, id, c); err != nil {
 		return uuid.Nil, err
 	}
@@ -35,7 +47,15 @@ func (l *Loop) Start(ctx context.Context, c core.RunConfig) (core.RunID, error) 
 	}
 	return id, nil
 }
-func (l *Loop) Resume(ctx context.Context, id core.RunID, e core.ExternalEvent) error {
+func (l *Loop) Resume(ctx context.Context, id core.RunID, e core.ExternalEvent) (err error) {
+	ctx, span := legiontelemetry.Tracer().Start(ctx, "agent.resume")
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
 	switch e.Type {
 	case "user_message":
 		if _, err := l.store.Append(ctx, id, core.NewUserMessage(e.Content)); err != nil {
@@ -64,7 +84,15 @@ func (l *Loop) resumeWithPayload(ctx context.Context, id core.RunID, payload any
 	}
 	return l.store.SetStatus(ctx, id, core.StatusResuming)
 }
-func (l *Loop) Recover(ctx context.Context, id core.RunID) error {
+func (l *Loop) Recover(ctx context.Context, id core.RunID) (err error) {
+	ctx, span := legiontelemetry.Tracer().Start(ctx, "agent.recover")
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
 	out, err := recoverSession(ctx, l.store, id)
 	if err != nil {
 		return err
@@ -78,7 +106,15 @@ func (l *Loop) Recover(ctx context.Context, id core.RunID) error {
 		return nil
 	}
 }
-func (l *Loop) Resolve(ctx context.Context, id core.RunID) (core.TurnEnvelope, error) {
+func (l *Loop) Resolve(ctx context.Context, id core.RunID) (envelope core.TurnEnvelope, err error) {
+	ctx, span := legiontelemetry.Tracer().Start(ctx, "agent.resolve")
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
 	log, err := l.store.ReadLog(ctx, id)
 	if err != nil {
 		return core.TurnEnvelope{}, err
@@ -147,12 +183,16 @@ func (l *Loop) run(ctx context.Context, id core.RunID, c core.RunConfig, budget 
 		}
 		wall := uint64(time.Since(started).Milliseconds())
 		var in, out uint32
+		var cacheRead, cacheWrite int
 		cost := 0.0
 		if message.Usage != nil {
 			in = uint32(max(message.Usage.Input, 0))
 			out = uint32(max(message.Usage.Output, 0))
+			cacheRead = max(message.Usage.CacheRead, 0)
+			cacheWrite = max(message.Usage.CacheWrite, 0)
 			cost = message.Usage.Cost.Total
 		}
+		l.telemetry.RecordUsage(ctx, c.Model, "success", int(in), int(out), cacheRead, cacheWrite)
 		calls := []map[string]any{}
 		for _, block := range message.Content {
 			if block.Type == "toolCall" {

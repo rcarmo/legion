@@ -148,6 +148,21 @@ func (r *SessionResources) Write(ctx context.Context, p string, data []byte) ([]
 			return nil, false, err
 		}
 		return marshal(status)
+	case "reconcile":
+		var req struct {
+			Action string `json:"action"`
+		}
+		if err = json.Unmarshal(data, &req); err != nil {
+			return nil, false, err
+		}
+		reconciler, ok := r.Loop.(core.Reconciler)
+		if !ok {
+			return nil, false, fmt.Errorf("reconciliation unavailable")
+		}
+		if err = reconciler.Reconcile(ctx, id, req.Action); err != nil {
+			return nil, false, err
+		}
+		return marshal(map[string]any{"run_id": id, "action": req.Action, "status": "idle"})
 	case "fork":
 		var req struct {
 			AtSeq core.SeqNum `json:"at_seq"`

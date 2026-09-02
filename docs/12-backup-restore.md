@@ -43,4 +43,4 @@ sudo systemctl start legion
 
 The restore script runs `restic check`, restores the selected snapshot/tag, validates every file against `SHA256SUMS`, and refuses to overwrite a non-empty destination. Set `LEGION_BACKUP_SNAPSHOT` to a snapshot ID instead of `latest` for point-in-time recovery.
 
-Run `make backup-restore-drill` after changing these scripts. The drill creates an encrypted local repository, backs up representative database/Raft/blob files, restores into a clean directory, verifies checksums, and compares both trees.
+Run `make go-backup-restore-drill` after changing these scripts. The Go drill starts a real node, commits a session through Raft, deploys a Bun artifact into the CAS, stops the node for a consistent snapshot, and restores into an empty directory. It verifies restic's checksums and byte-for-byte state, deletes the copied derived `state.db`, then proves the restored Raft log rebuilds the session view and the restored CAS function executes successfully.

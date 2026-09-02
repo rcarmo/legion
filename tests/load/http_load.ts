@@ -4,6 +4,7 @@ const concurrency = Number(process.env.LEGION_LOAD_CONCURRENCY ?? 8);
 const minRps = Number(process.env.LEGION_LOAD_MIN_RPS ?? 60);
 const maxP95Ms = Number(process.env.LEGION_LOAD_MAX_P95_MS ?? 200);
 const maxErrorRate = Number(process.env.LEGION_LOAD_MAX_ERROR_RATE ?? 0.001);
+const apiKey = process.env.LEGION_LOAD_API_KEY ?? "";
 const latencies: number[] = [];
 let next = 0;
 let errors = 0;
@@ -16,7 +17,7 @@ async function worker() {
     try {
       const response = await fetch(`${base}/functions/load/invoke`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
         body: JSON.stringify({ index }),
       });
       if (!response.ok) errors++;

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/rcarmo/legion/internal/agent"
+	"github.com/rcarmo/legion/internal/api"
 	"github.com/rcarmo/legion/internal/cluster"
 	"github.com/rcarmo/legion/internal/core"
 	"github.com/rcarmo/legion/internal/deploy"
@@ -24,6 +25,7 @@ import (
 	bunruntime "github.com/rcarmo/legion/internal/runtime/bun"
 	"github.com/rcarmo/legion/internal/runtime/joker"
 	wasmruntime "github.com/rcarmo/legion/internal/runtime/wasm"
+	legiontelemetry "github.com/rcarmo/legion/internal/telemetry"
 	"github.com/tmc/go-iroh/blobs"
 	"github.com/tmc/go-iroh/iroh"
 	"github.com/tmc/go-iroh/key"
@@ -47,6 +49,27 @@ func (a runtimeNamespaceAdapter) Write(ctx context.Context, path string, data []
 	return (*a.target).Write(ctx, path, data)
 }
 
+func firstEnv(names ...string) string {
+	for _, name := range names {
+		if value := os.Getenv(name); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+func envInt(name string, fallback int) int {
+	if value, err := strconv.Atoi(os.Getenv(name)); err == nil {
+		return value
+	}
+	return fallback
+}
+func envDurationMS(name string, fallback time.Duration) time.Duration {
+	if value, err := strconv.ParseInt(os.Getenv(name), 10, 64); err == nil {
+		return time.Duration(value) * time.Millisecond
+	}
+	return fallback
+}
+
 func main() {
 	if err := run(); err != nil {
 		log.Fatal(err)
@@ -61,7 +84,10 @@ func run() error {
 	raftAddr := flag.String("raft-addr", "127.0.0.1:7000", "stable Raft TCP address")
 	apiAddr := flag.String("api-addr", "127.0.0.1:8080", "cluster control and REST HTTP address")
 	ninepAddr := flag.String("9p-addr", "127.0.0.1:5640", "loopback 9P TCP address (empty disables)")
-	capability := flag.String("9p-capability", os.Getenv("LEGION_9P_CAPABILITY"), "9P attach capability token")
+	capability := flag.String("9p-capability", firstEnv("LEGION_NAMESPACE_CAPABILITY", "LEGION_9P_CAPABILITY"), "9P attach capability token")
+	apiKey := flag.String("api-key", os.Getenv("LEGION_API_KEY"), "REST API bearer key")
+	sessionRateMax := flag.Int("session-rate-max", envInt("LEGION_SESSION_MAX_REQUESTS_PER_WINDOW", 30), "maximum execution requests per session window (0 disables)")
+	sessionRateWindow := flag.Duration("session-rate-window", envDurationMS("LEGION_SESSION_RATE_WINDOW_MS", time.Minute), "session rate-limit window")
 	mdns := flag.Bool("mdns", true, "enable LAN discovery")
 	relay := flag.Bool("relay", true, "enable iroh relay transport")
 	discoveryWindow := flag.Duration("discovery-window", 3*time.Second, "Bonjour discovery window")
@@ -107,14 +133,27 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("deployment registry: %w", err)
 	}
+	telemetryProviders, err := legiontelemetry.Init(ctx, "legion", node.ShortID())
+	if err != nil {
+		return fmt.Errorf("telemetry: %w", err)
+	}
+	defer telemetryProviders.Shutdown(context.Background())
 	limits := legionruntime.DefaultLimits()
+	limits.Timeout = envDurationMS("LEGION_INVOKE_TIMEOUT_MS", limits.Timeout)
+	limits.MaxInputBytes = envInt("LEGION_INVOKE_MAX_INPUT_BYTES", limits.MaxInputBytes)
+	limits.MaxOutputBytes = envInt("LEGION_INVOKE_MAX_OUTPUT_BYTES", limits.MaxOutputBytes)
+	limits.MaxConcurrentPerFunction = envInt("LEGION_INVOKE_MAX_CONCURRENT_PER_FUNCTION", limits.MaxConcurrentPerFunction)
+	limits.MaxRequestsPerWindow = envInt("LEGION_INVOKE_MAX_REQUESTS_PER_WINDOW", limits.MaxRequestsPerWindow)
+	limits.RateWindow = envDurationMS("LEGION_INVOKE_RATE_WINDOW_MS", limits.RateWindow)
 	var runtimeNamespace *legionns.LegionNamespace
 	wasmHost := runtimeNamespaceAdapter{target: &runtimeNamespace}
 	wasm := wasmruntime.New(registry.CAS(), wasmHost, nil, limits)
 	defer wasm.Close(context.Background())
 	bun := bunruntime.New("", registry.CAS(), limits)
+	defer bun.Close()
 	jokerRuntime := joker.New("", registry.CAS(), limits)
-	functions := legionruntime.Functions{Registry: registry, WASM: legionruntime.NewBoundedInvoker(wasm, limits), Bun: legionruntime.NewBoundedInvoker(bun, limits), Joker: legionruntime.NewBoundedInvoker(jokerRuntime, limits)}
+	functionMetrics := legiontelemetry.NewFunctionMetrics()
+	functions := legionruntime.Functions{Registry: registry, WASM: legionruntime.ObservedInvoker{Inner: legionruntime.NewBoundedInvoker(wasm, limits), Observer: functionMetrics}, Bun: legionruntime.ObservedInvoker{Inner: legionruntime.NewBoundedInvoker(bun, limits), Observer: functionMetrics}, Joker: legionruntime.ObservedInvoker{Inner: legionruntime.NewBoundedInvoker(jokerRuntime, limits), Observer: functionMetrics}}
 	deployResources := deploy.Resources{Registry: registry, OnRegister: func(manifest legionruntime.Manifest) {
 		tree.EnsureDir("/fn/" + manifest.Name)
 		_ = tree.SetJSON("/fn/"+manifest.Name+"/manifest.json", manifest)
@@ -130,7 +169,9 @@ func run() error {
 		namespace.WithCapability([]byte(*capability))
 	}
 	mux := http.NewServeMux()
-	mux.Handle("/", legionns.REST{Namespace: namespace}.Handler())
+	sessionLimiter := api.NewSessionLimiter(*sessionRateMax, *sessionRateWindow)
+	metrics := legiontelemetry.StoreMetrics{Store: routed, Functions: functionMetrics, SessionRejections: sessionLimiter.Rejections}
+	mux.Handle("/", legionns.REST{Namespace: namespace, APIKey: *apiKey, SessionRateLimiter: sessionLimiter, Metrics: metrics}.Handler())
 	mux.Handle("/raft/", cluster.ControlServer{Store: store}.Handler())
 	mux.Handle("/store", cluster.ControlServer{Store: store}.Handler())
 	server := &http.Server{Addr: *apiAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}

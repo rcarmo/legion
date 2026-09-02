@@ -5,7 +5,7 @@ PREFIX=${PREFIX:-/usr/local}
 SYSCONFDIR=${SYSCONFDIR:-/etc}
 SYSTEMD_UNIT_DIR=${SYSTEMD_UNIT_DIR:-/etc/systemd/system}
 DESTDIR=${DESTDIR:-}
-BINARY=${BINARY:-target/release/legion}
+BINARY=${BINARY:-bin/legion}
 ENABLE=${ENABLE:-0}
 
 install_file() {
@@ -14,7 +14,7 @@ install_file() {
 }
 
 [ -f "$BINARY" ] || {
-    echo "missing binary: $BINARY (run 'cargo build -p legion-server --release')" >&2
+    echo "missing Go binary: $BINARY (run 'make go-build')" >&2
     exit 1
 }
 
@@ -29,16 +29,12 @@ fi
 
 install_file 0755 "$BINARY" "$PREFIX/bin/legion"
 install_file 0644 contrib/systemd/legion.service "$SYSTEMD_UNIT_DIR/legion.service"
-
-if [ ! -e "${DESTDIR}${SYSCONFDIR}/legion/legion.toml" ]; then
-    install_file 0640 contrib/systemd/legion.toml "$SYSCONFDIR/legion/legion.toml"
-fi
 if [ ! -e "${DESTDIR}${SYSCONFDIR}/legion/legion.env" ]; then
     install_file 0600 contrib/systemd/legion.env "$SYSCONFDIR/legion/legion.env"
 fi
 
 if [ -z "$DESTDIR" ]; then
-    chown root:legion "$SYSCONFDIR/legion/legion.toml" "$SYSCONFDIR/legion/legion.env"
+    chown root:legion "$SYSCONFDIR/legion/legion.env"
 fi
 
 if [ -z "$DESTDIR" ] && [ "$ENABLE" = 1 ]; then

@@ -26,6 +26,7 @@ type rustNinePReady struct {
 func TestRustGoNinePInterop(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", ".."))
 	cmd := exec.Command(filepath.Join(root, "target", "debug", "legion-ninep-interop-fixture"), "server")
+	cmd.Env = append(cmd.Environ(), "LEGION_NAMESPACE_CAPABILITY=rust-go-ninep-secret")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +64,15 @@ func TestRustGoNinePInterop(t *testing.T) {
 	for _, value := range ready.Addrs {
 		addr = addr.WithIP(netip.MustParseAddrPort(value))
 	}
-	client, err := DialIroh(ctx, ep, addr, "")
+	if client, dialErr := DialIroh(ctx, ep, addr, ""); dialErr == nil {
+		client.Close()
+		t.Fatal("Rust endpoint accepted missing 9P capability")
+	}
+	if client, dialErr := DialIroh(ctx, ep, addr, "wrong"); dialErr == nil {
+		client.Close()
+		t.Fatal("Rust endpoint accepted wrong 9P capability")
+	}
+	client, err := DialIroh(ctx, ep, addr, "rust-go-ninep-secret")
 	if err != nil {
 		t.Fatal(err)
 	}

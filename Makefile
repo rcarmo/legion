@@ -10,7 +10,8 @@ GO ?= go
 GO_TOOLCHAIN ?= go1.26.5
 GO_ENV := GOTOOLCHAIN=$(GO_TOOLCHAIN) CGO_ENABLED=0
 
-.PHONY: go-fmt go-fmt-check go-test go-test-core go-test-store go-test-agent go-vet go-check go-rust-interop go-ninep-interop go-blob-interop \
+.PHONY: go-fmt go-fmt-check go-test go-test-core go-test-store go-test-agent go-vet go-check go-build go-rust-interop go-ninep-interop go-blob-interop \
+	go-otel-integration-test go-process-smoke go-backup-restore-drill go-load-test go-load-test-raft go-load-test-http go-systemd-package-test go-verify-m4 go-install \
 	help preflight postflight space build release test lint fmt fmt-check check verify-m3 \
 	clean clean-junk distclean docs dev server integration-test cli-integration-test \
 	wasm-fixture wasm-integration-test otel-integration-test backup-restore-drill bun-ninep-integration-test dashboard-integration-test js-test load-test load-test-http load-test-hiqlite server-release install uninstall test-core test-store test-loop \
@@ -27,6 +28,7 @@ help:
 	  '  make clean               Remove Cargo build output' \
 	  '  make space               Show free space and build-tree size' \
 	  '  make go-check            Pure-Go format, vet, and test gate (CGO disabled)' \
+	  '  make go-verify-m4        One-pass Go Milestone 4 verification' \
 	  '  make go-test-core        Focused Go core contract tests' \
 	  '  make go-test-store       Focused pure-Go SQLite tests'
 
@@ -54,6 +56,11 @@ go-vet: preflight
 go-check: preflight go-fmt-check
 	$(GO_ENV) $(GO) vet ./...
 	$(GO_ENV) $(GO) test ./...
+
+go-build: preflight
+	@mkdir -p $(CURDIR)/bin
+	$(GO_ENV) $(GO) build -trimpath -o $(CURDIR)/bin/legion ./cmd/legion
+
 
 go-rust-interop: preflight
 	$(CARGO) build -p legion-cluster --bin legion-interop-fixture --bin legion-gossip-interop-fixture
@@ -219,6 +226,9 @@ docs: preflight
 install:
 	BINARY=$(CARGO_TARGET_DIR)/release/legion ./contrib/systemd/install.sh
 
+go-install: go-build
+	BINARY=$(CURDIR)/bin/legion ./contrib/systemd/install.sh
+
 uninstall:
 	./contrib/systemd/uninstall.sh
 
@@ -240,4 +250,45 @@ go-verify-m3: preflight joker-worker wasm-fixture go-blob-interop
 	LEGION_JOKER_TEST_BIN="$(JOKER_BIN)" LEGION_BUN_TEST_BIN="$$(command -v bun)" $(GO_ENV) $(GO) test -count=1 ./internal/namespace ./cmd/legion
 	$(GO_ENV) $(GO) build -o $(CURDIR)/bin/legion ./cmd/legion
 	LEGION_BUN_BIN="$$(command -v bun)" ./tests/integration/go_m3_smoke.sh
+	@$(MAKE) --no-print-directory postflight
+
+go-otel-integration-test: preflight
+	$(GO_ENV) $(GO) test -tags oteltest -count=1 -run '^TestAgentLifecycleAndTokenUsageReachOTLP$$' -v ./internal/telemetry
+
+go-process-smoke: go-build
+	$(GO_ENV) $(GO) build -trimpath -o $(CURDIR)/bin/ninep-smoke ./cmd/ninep-smoke
+	LEGION_BUN_BIN="$$(command -v bun)" ./tests/integration/go_m4_process_smoke.sh
+
+go-backup-restore-drill: go-build
+	@command -v restic >/dev/null || { echo 'ERROR: restic is required' >&2; exit 1; }
+	LEGION_BUN_BIN="$$(command -v bun)" ./tests/integration/restic_restore_drill.sh
+
+go-load-test-raft: preflight
+	$(GO_ENV) $(GO) test -tags loadtest -count=1 -run '^TestThreeNodeReplicatedBatchLoad$$' -v ./internal/raftstore
+
+go-load-test-http: go-build
+	LEGION_BUN_BIN="$$(command -v bun)" ./tests/load/run_http.sh
+
+go-load-test: go-load-test-raft go-load-test-http
+
+go-systemd-package-test: go-build
+	@stage="$$(mktemp -d)"; trap 'rm -rf "$$stage"' EXIT; \
+	 DESTDIR="$$stage" BINARY=$(CURDIR)/bin/legion ./contrib/systemd/install.sh; \
+	 test -x "$$stage/usr/local/bin/legion"; \
+	 test -f "$$stage/etc/systemd/system/legion.service"; \
+	 test -f "$$stage/etc/legion/legion.env"; \
+	 ! grep -q 'LEGION_CONFIG\| serve$$' "$$stage/etc/systemd/system/legion.service"; \
+	 systemd-analyze verify "$$stage/etc/systemd/system/legion.service"
+
+go-verify-m4: preflight go-fmt-check
+	@git diff --check
+	$(GO_ENV) $(GO) vet ./...
+	$(GO_ENV) $(GO) test -count=1 ./...
+	$(MAKE) --no-print-directory go-rust-interop
+	$(MAKE) --no-print-directory go-ninep-interop
+	$(MAKE) --no-print-directory go-otel-integration-test
+	$(MAKE) --no-print-directory go-process-smoke
+	$(MAKE) --no-print-directory go-backup-restore-drill
+	$(MAKE) --no-print-directory go-systemd-package-test
+	$(MAKE) --no-print-directory go-load-test
 	@$(MAKE) --no-print-directory postflight

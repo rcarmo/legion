@@ -32,12 +32,16 @@ async fn main() -> Result<()> {
             .await?;
             let ns = Namespace::new();
             ns.set_json("/cluster/health", json!({"rust":true})).await;
+            let namespace = match env::var("LEGION_NAMESPACE_CAPABILITY") {
+                Ok(token) => LegionNamespace::new(ns).with_capability_token(token),
+                Err(_) => LegionNamespace::new(ns),
+            };
             let addr = node.endpoint.addr();
             let ready = Ready {
                 endpoint_id: node.endpoint_id().to_string(),
                 addrs: addr.ip_addrs().map(ToString::to_string).collect(),
             };
-            let router = serve_namespace(&node, LegionNamespace::new(ns));
+            let router = serve_namespace(&node, namespace);
             println!("LEGION_NINEP_READY {}", serde_json::to_string(&ready)?);
             tokio::signal::ctrl_c().await?;
             router.shutdown().await?;

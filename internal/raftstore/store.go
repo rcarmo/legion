@@ -71,6 +71,10 @@ func Open(config Config) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err = materialized.ConfigureDerived(context.Background()); err != nil {
+		_ = materialized.Close()
+		return nil, err
+	}
 	closeMaterialized := true
 	defer func() {
 		if closeMaterialized {
@@ -209,6 +213,23 @@ func (s *Store) CreateSession(ctx context.Context, id core.RunID, config core.Ru
 func (s *Store) Append(ctx context.Context, id core.RunID, event core.TurnEvent) (core.SeqNum, error) {
 	result, err := s.apply(ctx, command{Version: commandVersion, Type: commandAppend, RunID: id, Event: &event, Timestamp: core.NowMS()})
 	return result.Seq, err
+}
+
+// AppendBatch commits multiple typed events through one Raft entry and one
+// SQLite transaction while preserving the ordinary per-session hash chain.
+func (s *Store) AppendBatch(ctx context.Context, id core.RunID, events []core.TurnEvent) (core.SeqNum, error) {
+	if len(events) == 0 {
+		return 0, fmt.Errorf("append batch requires at least one event")
+	}
+	result, err := s.apply(ctx, command{Version: commandVersion, Type: commandAppendBatch, RunID: id, Events: append([]core.TurnEvent(nil), events...), Timestamp: core.NowMS()})
+	return result.Seq, err
+}
+func (s *Store) appendLoadBatch(ctx context.Context, first uint64, rows []string) error {
+	if len(rows) == 0 {
+		return fmt.Errorf("load batch requires at least one row")
+	}
+	_, err := s.apply(ctx, command{Version: commandVersion, Type: commandLoadBatch, LoadFirst: first, LoadRows: append([]string(nil), rows...), Timestamp: core.NowMS()})
+	return err
 }
 func (s *Store) ReadLog(ctx context.Context, id core.RunID) ([]core.TurnEnvelope, error) {
 	if err := s.Barrier(ctx); err != nil {

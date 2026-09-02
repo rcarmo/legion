@@ -134,24 +134,37 @@ deployment and invocation for WASM, Bun, and Joker.
 
 **Goal**: Production-ready cluster with observability, backup, and security.
 
-- [ ] Authenticated encryption for go-iroh connections, proven interoperable with Rust Iroh endpoints
-- [ ] Authentication for namespace access (9P attach bearer capability, independent from REST API-key authentication)
-- [ ] Off-cluster, restorable backups
-  - [ ] Backend-neutral snapshot workflow with at least one production backend implemented
-  - [ ] Restic repositories supported (local, SFTP, REST, or object-storage backed)
-  - [ ] Quiesce or use a database-consistent snapshot before restic capture; never copy live SQLite/Raft files blindly
-  - [ ] Documented and automated restore procedure
-  - [ ] Successful restore drill from a clean node, with state integrity verified
-- [ ] OpenTelemetry traces for agent loop steps
-- [ ] OpenTelemetry metrics export for token consumption
-  - [ ] Monotonic input, output, cache-read, and cache-write token counters where providers expose them
-  - [ ] Low-cardinality dimensions for provider, model, node, and outcome; never session IDs, run IDs, prompts, or user content
-  - [ ] OTLP configuration plus an integration test proving token usage reaches an OTEL collector
-- [ ] Built-in metrics endpoint: turn latency, token counts, function invocation times
-- [ ] `legion session reconcile` — resolve `pending_reconciliation` sessions
-- [ ] Rate limiting per session / per function
-- [ ] Go `legion` server systemd unit file
-- [ ] Comprehensive load tests (three-node Raft/SQLite replicated batch gate ≥24.5k inserts/s; HTTP capacity, p95, error-rate, and overload-shedding gates)
+- [x] Authenticated encryption for go-iroh connections, proven interoperable with Rust Iroh endpoints
+- [x] Authentication for namespace access (9P attach bearer capability, independent from REST API-key authentication)
+- [x] Off-cluster, restorable backups
+  - [x] Backend-neutral snapshot workflow with at least one production backend implemented
+  - [x] Restic repositories supported (local, SFTP, REST, or object-storage backed)
+  - [x] Quiesce or use a database-consistent snapshot before restic capture; never copy live SQLite/Raft files blindly
+  - [x] Documented and automated restore procedure
+  - [x] Successful restore drill from a clean node, with state integrity verified
+- [x] OpenTelemetry traces for agent loop steps
+- [x] OpenTelemetry metrics export for token consumption
+  - [x] Monotonic input, output, cache-read, and cache-write token counters where providers expose them
+  - [x] Low-cardinality dimensions for provider, model, node, and outcome; never session IDs, run IDs, prompts, or user content
+  - [x] OTLP configuration plus an integration test proving token usage reaches an OTEL collector
+- [x] Built-in metrics endpoint: turn latency, token counts, function invocation times
+- [x] `legion session reconcile` — resolve `pending_reconciliation` sessions
+- [x] Rate limiting per session / per function
+- [x] Go `legion` server systemd unit file
+- [x] Comprehensive load tests (three-node Raft/SQLite replicated batch gate ≥24.5k inserts/s; HTTP capacity, p95, error-rate, and overload-shedding gates)
+
+Completed in the Go port on 2026-09-01. Mixed Rust/Go direct and forced-relay
+Iroh tests validate authenticated endpoint identities and encrypted ALPN traffic; the
+Rust 9P fixture rejects missing/wrong capabilities and accepts the independent
+matching token. The restic drill backs up genuine stopped Go Raft and CAS state,
+verifies checksums, restores to an empty node, deletes the derived SQLite view,
+then proves Raft rebuild and function execution. OTLP protobuf capture verifies
+`agent.start`, `agent.resume`, and `agent.resolve` spans plus input/output/cache
+counters with bounded labels. `make go-verify-m4` also covers reconciliation,
+REST/CLI authentication, public health, Prometheus metrics, 413/429/504 mappings,
+session/function limits, staged systemd packaging, a three-voter typed Raft/SQLite
+batch gate above 24.5k inserts/s, and authenticated HTTP capacity with p95/error
+and bounded overload-shedding gates.
 
 ---
 

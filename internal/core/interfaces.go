@@ -23,6 +23,10 @@ type AgentLoop interface {
 	Resolve(context.Context, RunID) (TurnEnvelope, error)
 }
 
+type Reconciler interface {
+	Reconcile(context.Context, RunID, string) error
+}
+
 type ToolRegistry interface {
 	Definitions(context.Context) ([]ToolDefinition, error)
 	Dispatch(context.Context, string, json.RawMessage) (json.RawMessage, error)

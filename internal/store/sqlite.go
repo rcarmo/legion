@@ -42,6 +42,14 @@ func OpenMemory() (*SQLiteStore, error) {
 	return Open("file:" + uuid.NewString() + "?mode=memory&cache=shared")
 }
 func (s *SQLiteStore) Close() error { return s.db.Close() }
+
+// ConfigureDerived disables redundant SQLite durability for a Raft-owned
+// materialized view. The authoritative bbolt log is fsynced by Raft and this
+// database is deleted and replayed on every process start.
+func (s *SQLiteStore) ConfigureDerived(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, "PRAGMA journal_mode=MEMORY; PRAGMA synchronous=OFF; PRAGMA temp_store=MEMORY;")
+	return err
+}
 func (s *SQLiteStore) init(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;"); err != nil {
 		return err

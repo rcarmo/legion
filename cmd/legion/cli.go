@@ -46,6 +46,12 @@ func runCLI(args []string) (bool, error) {
 				return true, fmt.Errorf("session history requires id")
 			}
 			method, p = "GET", "/sessions/"+args[2]+"/log"
+		case "reconcile":
+			if len(args) != 4 || (args[3] != "skip" && args[3] != "retry") {
+				return true, fmt.Errorf("usage: legion session reconcile ID skip|retry")
+			}
+			method, p = "POST", "/sessions/"+args[2]+"/reconcile"
+			body, _ = json.Marshal(map[string]string{"action": args[3]})
 		case "send":
 			if len(args) < 4 {
 				return true, fmt.Errorf("session send requires id and message")
@@ -145,6 +151,9 @@ func runCLI(args []string) (bool, error) {
 		return true, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if key := os.Getenv("LEGION_API_KEY"); key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return true, err

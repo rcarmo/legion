@@ -127,54 +127,30 @@ Verify:
 
 Repeat on a third machine. The cluster is now fault-tolerant: any single node failure maintains quorum.
 
-## Configuration
+## Go daemon configuration
 
-The daemon reads `./legion.toml` by default. Set `LEGION_CONFIG` to an explicit path; unlike the optional default, an unreadable or invalid explicit file is fatal.
+The Go daemon uses explicit flags for node addresses and non-secret environment variables for runtime policy. Run `legion -help` for the full flag set. A production single-node invocation looks like:
 
-```toml
-# Optional API authentication; prefer LEGION_API_KEY in the environment.
-# api_key = "replace-me"
-
-# Distributed builds additionally accept top-level raft_peers,
-# raft_node_id, raft_secret, and raft_api_secret values here.
-
-[cluster]
-data_dir = "/var/lib/legion"
-bind_addr = "0.0.0.0:0"
-api_port = 8080
-mdns = true
-
-[model]
-default_model = "anthropic/claude-haiku-3-5"
-system_prompt = "You are a Legion cluster agent."
-
-[invocation]
-timeout_ms = 30000
-max_input_bytes = 1048576
-max_output_bytes = 4194304
-max_concurrent_per_function = 8
-max_requests_per_window = 120
-rate_window_ms = 60000
-
-[session_rate_limit]
-max_requests_per_window = 30
-window_ms = 60000
+```sh
+legion --data-dir /var/lib/legion \
+  --iroh-addr '[::]:0' --raft-addr 0.0.0.0:17001 \
+  --api-addr 0.0.0.0:8080 --9p-addr 127.0.0.1:5640
 ```
 
-The packaged systemd unit sets `LEGION_CONFIG=/etc/legion/legion.toml` and loads secrets from `/etc/legion/legion.env`.
+Configure secrets and policy in a mode-0600 environment file. `contrib/systemd/legion.env` lists every supported setting, including `LEGION_API_KEY`, the independent `LEGION_NAMESPACE_CAPABILITY`, `LEGION_INVOKE_*`, `LEGION_SESSION_*`, and standard OTLP variables.
 
 ## systemd Installation
 
-Build and install a dedicated `legion` service account, hardened unit, configuration, and environment template:
+Build and install a dedicated `legion` service account, hardened unit, and environment template:
 
 ```bash
-cargo build -p legion-server --release
-sudo ENABLE=1 make install
+make go-build
+sudo ENABLE=1 make go-install
 systemctl status legion.service
 journalctl -u legion.service -f
 ```
 
-`make install` preserves existing files under `/etc/legion`. `make uninstall` removes the binary and unit but deliberately preserves `/etc/legion` and `/var/lib/legion`. Use `DESTDIR=/tmp/legion-package make install` to stage a package without touching the host.
+`make go-install` preserves an existing `/etc/legion/legion.env`. `make uninstall` removes the binary and unit but deliberately preserves `/etc/legion` and `/var/lib/legion`. Use `DESTDIR=/tmp/legion-package make go-install` to stage a package without touching the host.
 
 ## REST API
 
@@ -200,7 +176,7 @@ GET    /metrics                        # Prometheus text metrics
 
 ## Namespace authentication
 
-Set `LEGION_NAMESPACE_CAPABILITY` (or `namespace_capability` in `legion.toml`) to require a bearer capability on every 9P attach. Clients send it in `Tattach.aname` as `cap=<token>`; Legion's peer proxy forwards the configured capability automatically. Keep this token independent from `LEGION_API_KEY`, and prefer the environment or service credential storage over a checked-in config file. When unset, the namespace remains available to authenticated iroh peers for development compatibility.
+Set `LEGION_NAMESPACE_CAPABILITY` to require a bearer capability on every 9P attach. Clients send it in `Tattach.aname` as `cap=<token>`; Legion's peer proxy forwards the configured capability automatically. Keep this token independent from `LEGION_API_KEY`, and prefer the environment or service credential storage over a checked-in config file. When unset, the namespace remains available to authenticated iroh peers for development compatibility.
 
 ## Useful Commands
 
@@ -222,23 +198,11 @@ legion call <name>       # invoke function (stdin/stdout)
 
 ### Invocation limits
 
-Bun and WASM functions share the same limits whether called through REST or by an agent. Configure them in `legion.toml`:
+Bun, Joker, and WASM functions share the same limits whether called through REST or by an agent. Configure them with `LEGION_INVOKE_TIMEOUT_MS`, `LEGION_INVOKE_MAX_INPUT_BYTES`, `LEGION_INVOKE_MAX_OUTPUT_BYTES`, `LEGION_INVOKE_MAX_CONCURRENT_PER_FUNCTION`, `LEGION_INVOKE_MAX_REQUESTS_PER_WINDOW`, and `LEGION_INVOKE_RATE_WINDOW_MS`. Limit errors return HTTP 413 (payload), 429 (rate/concurrency), or 504 (deadline). `/metrics` reports per-function invocation counts and wall time plus replay-derived agent turn and token totals.
 
-```toml
-[invocation]
-timeout_ms = 30000
-max_input_bytes = 1048576
-max_output_bytes = 4194304
-max_concurrent_per_function = 8
-max_requests_per_window = 120
-rate_window_ms = 60000
-```
+Legion exports agent-loop spans and token consumption over OTLP/HTTP when `OTEL_EXPORTER_OTLP_ENDPOINT` or a signal-specific endpoint is set. Standard OpenTelemetry variables configure endpoints, headers, and timeouts. Input, output, cache-read, and cache-write usage are monotonic counters where the provider supplies those values. Attributes are restricted to bounded operational dimensions such as provider, configured model, node, and outcome; session IDs, run IDs, prompts, and user content are forbidden to avoid high-cardinality series and data leakage. The existing `/metrics` endpoint remains available independently of OTLP export. Run `make go-otel-integration-test` to decode captured OTLP protobufs and verify lifecycle spans and all four token counters are delivered without high-cardinality/content attributes.
 
-The equivalent environment overrides are `LEGION_INVOKE_TIMEOUT_MS`, `LEGION_INVOKE_MAX_INPUT_BYTES`, `LEGION_INVOKE_MAX_OUTPUT_BYTES`, `LEGION_INVOKE_MAX_CONCURRENT_PER_FUNCTION`, `LEGION_INVOKE_MAX_REQUESTS_PER_WINDOW`, and `LEGION_INVOKE_RATE_WINDOW_MS`. Limit errors return HTTP 413 (payload), 429 (rate/concurrency), or 504 (deadline). `/metrics` reports per-function invocation counts and wall time plus replay-derived agent turn and token totals.
-
-Legion exports agent-loop spans and token consumption over OTLP/HTTP when `OTEL_EXPORTER_OTLP_ENDPOINT` or a signal-specific endpoint is set. Standard OpenTelemetry variables configure endpoints, headers, and timeouts. Input, output, cache-read, and cache-write usage are monotonic counters where the provider supplies those values. Attributes are restricted to bounded operational dimensions such as provider, configured model, node, and outcome; session IDs, run IDs, prompts, and user content are forbidden to avoid high-cardinality series and data leakage. The existing `/metrics` endpoint remains available independently of OTLP export. Run `make otel-integration-test` to verify local trace and metric delivery.
-
-Session execution requests (`messages`, `stream`, and external `events`) are limited per session through `[session_rate_limit]`, with `LEGION_SESSION_MAX_REQUESTS_PER_WINDOW` and `LEGION_SESSION_RATE_WINDOW_MS` overrides. Read and reconciliation routes remain available. HTTP 429 responses include `Retry-After`; function and session rejections are exported by `/metrics`.
+Session message execution is limited per session with `LEGION_SESSION_MAX_REQUESTS_PER_WINDOW` and `LEGION_SESSION_RATE_WINDOW_MS`. Read and reconciliation routes remain available. HTTP 429 responses include `Retry-After`; function and session rejections are exported by `/metrics`.
 
 Session budgets accept `max_turns`, `max_tool_calls`, `max_tokens_in`, `max_tokens_out`, and `max_wall_ms`. Budget halts are stored as `SessionBudgetHalt` events and set the durable session status to `budget_halt`.
 

@@ -157,6 +157,9 @@ func ToolCallIntent(name, id string, effect EffectClass, args any) TurnEvent {
 func ToolResult(id string, result any) TurnEvent {
 	return TurnEvent{Kind: EventKind{Kind: "tool_result", CallID: id}, Payload: raw(result)}
 }
+func ToolCallReconciled(id, action string) TurnEvent {
+	return TurnEvent{Kind: EventKind{Kind: "tool_call_reconciled", CallID: id, Action: action}}
+}
 func SessionStarted(c RunConfig) TurnEvent {
 	return TurnEvent{Kind: EventKind{Kind: "session_started"}, Payload: raw(c)}
 }

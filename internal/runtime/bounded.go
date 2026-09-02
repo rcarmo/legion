@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // BoundedInvoker enforces limits shared by all runtime backends.
@@ -12,6 +13,7 @@ type BoundedInvoker struct {
 	limits     Limits
 	mu         sync.Mutex
 	semaphores map[string]chan struct{}
+	rate       *WindowLimiter
 }
 
 func NewBoundedInvoker(inner Invoker, limits Limits) *BoundedInvoker {
@@ -33,7 +35,7 @@ func NewBoundedInvoker(inner Invoker, limits Limits) *BoundedInvoker {
 			limits.MaxMemoryBytes = defaults.MaxMemoryBytes
 		}
 	}
-	return &BoundedInvoker{inner: inner, limits: limits, semaphores: map[string]chan struct{}{}}
+	return &BoundedInvoker{inner: inner, limits: limits, semaphores: map[string]chan struct{}{}, rate: NewWindowLimiter(limits.MaxRequestsPerWindow, limits.RateWindow)}
 }
 func (b *BoundedInvoker) semaphore(name string) chan struct{} {
 	b.mu.Lock()
@@ -47,14 +49,17 @@ func (b *BoundedInvoker) semaphore(name string) chan struct{} {
 }
 func (b *BoundedInvoker) Invoke(ctx context.Context, req Request) (Result, error) {
 	if len(req.Args) > b.limits.MaxInputBytes {
-		return Result{}, fmt.Errorf("function %s input exceeds %d bytes", req.FunctionName, b.limits.MaxInputBytes)
+		return Result{}, LimitError{Function: req.FunctionName, Kind: LimitInput, Limit: b.limits.MaxInputBytes}
+	}
+	if retry, ok := b.rate.Check(req.FunctionName); !ok {
+		return Result{}, LimitError{Function: req.FunctionName, Kind: LimitRate, RetryAfter: retry}
 	}
 	s := b.semaphore(req.FunctionName)
 	select {
 	case s <- struct{}{}:
 		defer func() { <-s }()
 	default:
-		return Result{}, fmt.Errorf("function %s is busy", req.FunctionName)
+		return Result{}, LimitError{Function: req.FunctionName, Kind: LimitBusy, RetryAfter: 100 * time.Millisecond}
 	}
 	callCtx, cancel := context.WithTimeout(ctx, b.limits.Timeout)
 	defer cancel()
@@ -66,13 +71,13 @@ func (b *BoundedInvoker) Invoke(ctx context.Context, req Request) (Result, error
 	go func() { r, e := b.inner.Invoke(callCtx, req); ch <- response{r, e} }()
 	select {
 	case <-callCtx.Done():
-		return Result{}, fmt.Errorf("function %s timed out: %w", req.FunctionName, callCtx.Err())
+		return Result{}, fmt.Errorf("%w: %v", LimitError{Function: req.FunctionName, Kind: LimitTimeout}, callCtx.Err())
 	case out := <-ch:
 		if out.e != nil {
 			return out.r, out.e
 		}
 		if len(out.r.Output) > b.limits.MaxOutputBytes {
-			return Result{}, fmt.Errorf("function %s output exceeds %d bytes", req.FunctionName, b.limits.MaxOutputBytes)
+			return Result{}, LimitError{Function: req.FunctionName, Kind: LimitOutput, Limit: b.limits.MaxOutputBytes}
 		}
 		return out.r, nil
 	}

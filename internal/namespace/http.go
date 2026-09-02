@@ -1,14 +1,19 @@
 package namespace
 
 import (
+	"context"
+	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/rcarmo/legion/internal/core"
-	"strings"
+	legionruntime "github.com/rcarmo/legion/internal/runtime"
 )
 
 func (n *LegionNamespace) ReadPath(r *http.Request, p string) ([]byte, error) {
@@ -21,7 +26,19 @@ func (n *LegionNamespace) WritePath(r *http.Request, p string, b []byte) ([]byte
 	return n.read(r.Context(), p)
 }
 
-type REST struct{ Namespace *LegionNamespace }
+type SessionRateLimiter interface {
+	Check(string) (time.Duration, bool)
+}
+type MetricsRenderer interface {
+	Render(context.Context) (string, error)
+}
+
+type REST struct {
+	Namespace          *LegionNamespace
+	APIKey             string
+	SessionRateLimiter SessionRateLimiter
+	Metrics            MetricsRenderer
+}
 
 func (a REST) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -32,10 +49,45 @@ func (a REST) Handler() http.Handler {
 	mux.HandleFunc("GET /sessions/{id}", a.session)
 	mux.HandleFunc("GET /sessions/{id}/log", a.session)
 	mux.HandleFunc("POST /sessions/{id}/messages", a.session)
+	mux.HandleFunc("POST /sessions/{id}/reconcile", a.session)
 	mux.HandleFunc("GET /cluster/{field}", a.cluster)
 	mux.HandleFunc("POST /functions/{name}/invoke", a.function)
 	mux.HandleFunc("POST /deploy/{operation}", a.deploy)
-	return mux
+	mux.HandleFunc("GET /metrics", a.metrics)
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) { writeHTTP(w, []byte(`{"ok":true}`), nil) })
+	return a.authenticate(mux)
+}
+func (a REST) authenticate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a.APIKey == "" || r.URL.Path == "/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if provided == "" {
+			provided = r.Header.Get("X-Legion-Key")
+		}
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(a.APIKey)) != 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "API key required or invalid"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+func (a REST) metrics(w http.ResponseWriter, r *http.Request) {
+	if a.Metrics == nil {
+		writeHTTP(w, nil, fmt.Errorf("metrics unavailable"))
+		return
+	}
+	body, err := a.Metrics.Render(r.Context())
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	if err != nil {
+		writeHTTP(w, nil, err)
+		return
+	}
+	_, _ = io.WriteString(w, body)
 }
 func (a REST) path(w http.ResponseWriter, r *http.Request) {
 	p := "/" + r.PathValue("path")
@@ -87,10 +139,21 @@ func (a REST) session(w http.ResponseWriter, r *http.Request) {
 		p = base + "/turns"
 	case strings.HasSuffix(r.URL.Path, "/messages"):
 		p = base + "/turns"
+	case strings.HasSuffix(r.URL.Path, "/reconcile"):
+		p = base + "/reconcile"
 	default:
 		p = base + "/status"
 	}
 	if r.Method == http.MethodPost {
+		if strings.HasSuffix(r.URL.Path, "/messages") && a.SessionRateLimiter != nil {
+			if retry, ok := a.SessionRateLimiter.Check(r.PathValue("id")); !ok {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Retry-After", strconv.FormatInt(max(1, int64((retry+time.Second-1)/time.Second)), 10))
+				w.WriteHeader(http.StatusTooManyRequests)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": "session rate limit exceeded", "retry_after_ms": retry.Milliseconds()})
+				return
+			}
+		}
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 		if err != nil {
 			writeHTTP(w, nil, err)
@@ -130,9 +193,37 @@ func (a REST) function(w http.ResponseWriter, r *http.Request) {
 	b, err := a.Namespace.WritePath(r, "/fn/"+r.PathValue("name"), body)
 	writeHTTP(w, b, err)
 }
+func writeLimitHTTP(w http.ResponseWriter, err error) bool {
+	var limit legionruntime.LimitError
+	if !errors.As(err, &limit) {
+		return false
+	}
+	status := http.StatusUnprocessableEntity
+	switch limit.Kind {
+	case legionruntime.LimitInput, legionruntime.LimitOutput:
+		status = http.StatusRequestEntityTooLarge
+	case legionruntime.LimitBusy, legionruntime.LimitRate:
+		status = http.StatusTooManyRequests
+	case legionruntime.LimitTimeout:
+		status = http.StatusGatewayTimeout
+	}
+	if limit.RetryAfter > 0 {
+		w.Header().Set("Retry-After", strconv.FormatInt(max(1, int64((limit.RetryAfter+time.Second-1)/time.Second)), 10))
+	}
+	w.WriteHeader(status)
+	body := map[string]any{"error": err.Error()}
+	if limit.RetryAfter > 0 {
+		body["retry_after_ms"] = limit.RetryAfter.Milliseconds()
+	}
+	_ = json.NewEncoder(w).Encode(body)
+	return true
+}
 func writeHTTP(w http.ResponseWriter, b []byte, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
+		if writeLimitHTTP(w, err) {
+			return
+		}
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
