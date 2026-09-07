@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rcarmo/legion/internal/core"
+	"github.com/rcarmo/legion/internal/ecosystem"
 	legionruntime "github.com/rcarmo/legion/internal/runtime"
 )
 
@@ -34,6 +35,8 @@ type MetricsRenderer interface {
 }
 
 type REST struct {
+	Agents             *ecosystem.AgentToolRegistry
+	Tools              core.ToolRegistry
 	Namespace          *LegionNamespace
 	APIKey             string
 	SessionRateLimiter SessionRateLimiter
@@ -42,6 +45,11 @@ type REST struct {
 
 func (a REST) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /agents", a.agents)
+	mux.HandleFunc("POST /agents", a.agents)
+	mux.HandleFunc("DELETE /agents/{name}", a.agents)
+	mux.HandleFunc("POST /agents/{name}/invoke", a.agents)
+	mux.HandleFunc("POST /workflows/run", a.workflow)
 	mux.HandleFunc("GET /namespace/{path...}", a.path)
 	mux.HandleFunc("PUT /namespace/{path...}", a.path)
 	mux.HandleFunc("POST /sessions", a.sessions)

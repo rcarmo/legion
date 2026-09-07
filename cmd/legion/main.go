@@ -19,6 +19,7 @@ import (
 	"github.com/rcarmo/legion/internal/cluster"
 	"github.com/rcarmo/legion/internal/core"
 	"github.com/rcarmo/legion/internal/deploy"
+	"github.com/rcarmo/legion/internal/ecosystem"
 	legionns "github.com/rcarmo/legion/internal/namespace"
 	"github.com/rcarmo/legion/internal/raftstore"
 	legionruntime "github.com/rcarmo/legion/internal/runtime"
@@ -128,7 +129,10 @@ func run() error {
 	directory.AddPeers(bootstrap.Peers)
 	routed := cluster.NewRoutedStore(store, directory)
 	tree := legionns.NewTree()
-	agentLoop := agent.New(routed, core.EchoToolRegistry{}, agent.GoAI{})
+	agents := ecosystem.NewAgentToolRegistry(routed)
+	tools := ecosystem.Tools{Agents: agents, Base: core.EchoToolRegistry{}}
+	agentLoop := agent.New(routed, tools, agent.GoAI{})
+	agents.Bind(agentLoop)
 	registry, err := deploy.Open(filepath.Join(*dataDir, "functions"))
 	if err != nil {
 		return fmt.Errorf("deployment registry: %w", err)
@@ -171,7 +175,7 @@ func run() error {
 	mux := http.NewServeMux()
 	sessionLimiter := api.NewSessionLimiter(*sessionRateMax, *sessionRateWindow)
 	metrics := legiontelemetry.StoreMetrics{Store: routed, Functions: functionMetrics, SessionRejections: sessionLimiter.Rejections}
-	mux.Handle("/", legionns.REST{Namespace: namespace, APIKey: *apiKey, SessionRateLimiter: sessionLimiter, Metrics: metrics}.Handler())
+	mux.Handle("/", legionns.REST{Agents: agents, Tools: tools, Namespace: namespace, APIKey: *apiKey, SessionRateLimiter: sessionLimiter, Metrics: metrics}.Handler())
 	mux.Handle("/raft/", cluster.ControlServer{Store: store}.Handler())
 	mux.Handle("/store", cluster.ControlServer{Store: store}.Handler())
 	server := &http.Server{Addr: *apiAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}

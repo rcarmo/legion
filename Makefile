@@ -47,6 +47,13 @@ go-test-store: preflight
 go-test-agent: preflight
 	$(GO_ENV) $(GO) test ./internal/agent
 
+.PHONY: go-test-ecosystem go-test-ecosystem-api
+go-test-ecosystem:
+	$(GO_ENV) $(GO) test ./internal/ecosystem
+
+go-test-ecosystem-api:
+	$(GO_ENV) $(GO) test ./internal/namespace ./cmd/legion -run '^TestEcosystemREST$$' -count=1
+
 go-test: preflight
 	$(GO_ENV) $(GO) test ./...
 
