@@ -52,7 +52,11 @@ go-test-ecosystem:
 	$(GO_ENV) $(GO) test ./internal/ecosystem
 
 go-test-ecosystem-api:
-	$(GO_ENV) $(GO) test ./internal/namespace ./cmd/legion -run '^TestEcosystemREST$$' -count=1
+	$(GO_ENV) $(GO) test ./internal/namespace ./cmd/legion -run 'Test(EcosystemREST|DashboardAPIContracts)' -count=1
+
+.PHONY: go-m5-smoke
+go-m5-smoke: go-build js-test
+	bash ./tests/integration/go_m5_smoke.sh
 
 go-test: preflight
 	$(GO_ENV) $(GO) test ./...

@@ -45,6 +45,9 @@ type REST struct {
 
 func (a REST) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", dashboard)
+	mux.HandleFunc("GET /dashboard", dashboard)
+	mux.HandleFunc("GET /functions", a.functions)
 	mux.HandleFunc("GET /agents", a.agents)
 	mux.HandleFunc("POST /agents", a.agents)
 	mux.HandleFunc("DELETE /agents/{name}", a.agents)
@@ -62,12 +65,12 @@ func (a REST) Handler() http.Handler {
 	mux.HandleFunc("POST /functions/{name}/invoke", a.function)
 	mux.HandleFunc("POST /deploy/{operation}", a.deploy)
 	mux.HandleFunc("GET /metrics", a.metrics)
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) { writeHTTP(w, []byte(`{"ok":true}`), nil) })
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) { writeHTTP(w, []byte(`{"ok":true,"version":"go"}`), nil) })
 	return a.authenticate(mux)
 }
 func (a REST) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if a.APIKey == "" || r.URL.Path == "/health" {
+		if a.APIKey == "" || r.URL.Path == "/health" || ((r.Method == http.MethodGet || r.Method == http.MethodHead) && (r.URL.Path == "/" || r.URL.Path == "/dashboard")) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -120,6 +123,15 @@ func (a REST) sessions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		b, err := a.Namespace.WritePath(r, "/sessions/new", body)
+		if err == nil {
+			var created struct {
+				RunID string `json:"run_id"`
+			}
+			err = json.Unmarshal(b, &created)
+			if err == nil {
+				b, err = json.Marshal(map[string]any{"id": created.RunID, "status": "idle"})
+			}
+		}
 		writeHTTP(w, b, err)
 		return
 	}
@@ -127,7 +139,10 @@ func (a REST) sessions(w http.ResponseWriter, r *http.Request) {
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 		xs, err := sr.Store.ListSessions(r.Context(), coreFilter(r.URL.Query().Get("status"), limit, offset))
-		b, _ := json.Marshal(xs)
+		if xs == nil {
+			xs = []core.SessionSummary{}
+		}
+		b, _ := json.Marshal(map[string]any{"sessions": xs})
 		writeHTTP(w, b, err)
 		return
 	}
@@ -171,10 +186,40 @@ func (a REST) session(w http.ResponseWriter, r *http.Request) {
 		writeHTTP(w, b, err)
 	} else {
 		b, err := a.Namespace.ReadPath(r, p)
+		if err == nil {
+			var value any
+			err = json.Unmarshal(b, &value)
+			if err == nil {
+				field := "status"
+				if strings.HasSuffix(r.URL.Path, "/log") {
+					field = "entries"
+					if value == nil {
+						value = []any{}
+					}
+				}
+				b, err = json.Marshal(map[string]any{"id": r.PathValue("id"), field: value})
+			}
+		}
 		writeHTTP(w, b, err)
 	}
 }
 func (a REST) cluster(w http.ResponseWriter, r *http.Request) {
+	if r.PathValue("field") == "peers" {
+		self, err := a.Namespace.ReadPath(r, "/cluster/self")
+		if err != nil {
+			writeHTTP(w, nil, err)
+			return
+		}
+		peers := []json.RawMessage{}
+		for _, name := range a.Namespace.tree.List("/cluster/peers") {
+			if node, ok := a.Namespace.tree.Get("/cluster/peers/" + name); ok && node.Kind == JSON {
+				peers = append(peers, json.RawMessage(node.Data))
+			}
+		}
+		b, err := json.Marshal(map[string]any{"self": json.RawMessage(self), "peers": peers})
+		writeHTTP(w, b, err)
+		return
+	}
 	b, err := a.Namespace.ReadPath(r, "/cluster/"+r.PathValue("field"))
 	writeHTTP(w, b, err)
 }

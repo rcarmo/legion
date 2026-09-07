@@ -129,10 +129,6 @@ func run() error {
 	directory.AddPeers(bootstrap.Peers)
 	routed := cluster.NewRoutedStore(store, directory)
 	tree := legionns.NewTree()
-	agents := ecosystem.NewAgentToolRegistry(routed)
-	tools := ecosystem.Tools{Agents: agents, Base: core.EchoToolRegistry{}}
-	agentLoop := agent.New(routed, tools, agent.GoAI{})
-	agents.Bind(agentLoop)
 	registry, err := deploy.Open(filepath.Join(*dataDir, "functions"))
 	if err != nil {
 		return fmt.Errorf("deployment registry: %w", err)
@@ -158,6 +154,11 @@ func run() error {
 	jokerRuntime := joker.New("", registry.CAS(), limits)
 	functionMetrics := legiontelemetry.NewFunctionMetrics()
 	functions := legionruntime.Functions{Registry: registry, WASM: legionruntime.ObservedInvoker{Inner: legionruntime.NewBoundedInvoker(wasm, limits), Observer: functionMetrics}, Bun: legionruntime.ObservedInvoker{Inner: legionruntime.NewBoundedInvoker(bun, limits), Observer: functionMetrics}, Joker: legionruntime.ObservedInvoker{Inner: legionruntime.NewBoundedInvoker(jokerRuntime, limits), Observer: functionMetrics}}
+	namespace := legionns.New(tree)
+	agents := ecosystem.NewAgentToolRegistry(routed)
+	tools := ecosystem.Tools{Agents: agents, Base: legionruntime.FunctionTools{Registry: registry, Functions: functions, Base: legionns.ClusterTools{Namespace: namespace, Base: core.EchoToolRegistry{}}}}
+	agentLoop := agent.New(routed, tools, agent.GoAI{})
+	agents.Bind(agentLoop)
 	deployResources := deploy.Resources{Registry: registry, OnRegister: func(manifest legionruntime.Manifest) {
 		tree.EnsureDir("/fn/" + manifest.Name)
 		_ = tree.SetJSON("/fn/"+manifest.Name+"/manifest.json", manifest)
@@ -167,7 +168,7 @@ func run() error {
 			deployResources.OnRegister(manifest)
 		}
 	}
-	namespace := legionns.New(tree).WithResources(legionns.NewSessionResources(routed, agentLoop)).WithDeploy(deployResources).WithFunctions(functions).WithCluster(legionns.LiveCluster{Node: node, Store: store, Tree: tree})
+	namespace.WithResources(legionns.NewSessionResources(routed, agentLoop)).WithDeploy(deployResources).WithFunctions(functions).WithCluster(legionns.LiveCluster{Node: node, Store: store, Tree: tree})
 	runtimeNamespace = namespace
 	if *capability != "" {
 		namespace.WithCapability([]byte(*capability))

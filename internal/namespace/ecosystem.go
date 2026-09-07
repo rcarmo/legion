@@ -20,7 +20,7 @@ func (a REST) agents(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		b, err := json.Marshal(a.Agents.Profiles())
+		b, err := json.Marshal(map[string]any{"agents": a.Agents.Profiles()})
 		writeHTTP(w, b, err)
 	case http.MethodDelete:
 		if !a.Agents.Unregister(r.PathValue("name")) {

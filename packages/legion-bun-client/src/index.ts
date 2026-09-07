@@ -2,6 +2,7 @@ import type { Socket } from "bun";
 
 const TVERSION = 100, RVERSION = 101, TATTACH = 104, RATTACH = 105;
 const TWALK = 110, RWALK = 111, TREAD = 116, RREAD = 117, TWRITE = 118, RWRITE = 119, RLERROR = 7;
+const TLOPEN = 12, RLOPEN = 13, TCLUNK = 120, RCLUNK = 121;
 const NOTAG = 0xffff, NOFID = 0xffffffff, MSIZE = 65536;
 
 export interface LegionFsOptions {
@@ -60,21 +61,36 @@ export class LegionFs {
   async readFile(path: string, encoding?: "utf8"): Promise<Uint8Array | string> {
     await this.connect();
     const fid = await this.walk(path);
-    const request = new Writer(); request.u32(fid); request.u64(0); request.u32(MSIZE - 24);
-    const reply = await this.rpc(TREAD, RREAD, request);
-    const count = new DataView(reply.body.buffer, reply.body.byteOffset).getUint32(0, true);
-    const data = reply.body.slice(4, 4 + count);
-    return encoding === "utf8" ? new TextDecoder().decode(data) : data;
+    try {
+      await this.open(fid, 0);
+      const chunks: Uint8Array[] = []; let offset = 0;
+      for (;;) {
+        const request = new Writer(); request.u32(fid); request.u64(offset); request.u32(MSIZE - 24);
+        const reply = await this.rpc(TREAD, RREAD, request);
+        const count = new DataView(reply.body.buffer, reply.body.byteOffset).getUint32(0, true);
+        if (count > reply.body.length - 4) throw new Error("invalid 9P read length");
+        if (!count) break;
+        chunks.push(reply.body.slice(4, 4 + count)); offset += count;
+      }
+      const data = new Uint8Array(offset); let at = 0;
+      for (const chunk of chunks) { data.set(chunk, at); at += chunk.length; }
+      return encoding === "utf8" ? new TextDecoder().decode(data) : data;
+    } finally { await this.clunk(fid); }
   }
 
   async writeFile(path: string, input: string | Uint8Array): Promise<void> {
     await this.connect();
     const fid = await this.walk(path);
-    const data = typeof input === "string" ? new TextEncoder().encode(input) : input;
-    const request = new Writer(); request.u32(fid); request.u64(0); request.data(data);
-    const reply = await this.rpc(TWRITE, RWRITE, request);
-    const written = new DataView(reply.body.buffer, reply.body.byteOffset).getUint32(0, true);
-    if (written !== data.length) throw new Error(`short 9P write: ${written}/${data.length}`);
+    try {
+      const data = typeof input === "string" ? new TextEncoder().encode(input) : input;
+      // Namespace writes are commands, so do not split one command across RPCs.
+      if (data.length > MSIZE - 24) throw new Error("9P command exceeds negotiated message size");
+      await this.open(fid, 1);
+      const request = new Writer(); request.u32(fid); request.u64(0); request.data(data);
+      const reply = await this.rpc(TWRITE, RWRITE, request);
+      const written = new DataView(reply.body.buffer, reply.body.byteOffset).getUint32(0, true);
+      if (written !== data.length) throw new Error(`short 9P write: ${written}/${data.length}`);
+    } finally { await this.clunk(fid); }
   }
 
   async readJson<T = unknown>(path: string): Promise<T> {
@@ -98,8 +114,21 @@ export class LegionFs {
     const parts = path.split("/").filter(Boolean);
     const walk = new Writer(); walk.u32(root); walk.u32(fid); walk.u16(parts.length);
     for (const part of parts) walk.string(part);
-    await this.rpc(TWALK, RWALK, walk);
-    return fid;
+    try {
+      const reply = await this.rpc(TWALK, RWALK, walk);
+      const count = new DataView(reply.body.buffer, reply.body.byteOffset).getUint16(0, true);
+      if (count !== parts.length) { if (count) await this.clunk(fid); throw new Error("incomplete 9P walk"); }
+      return fid;
+    } finally { await this.clunk(root); }
+  }
+
+  private async open(fid: number, flags: number) {
+    const request = new Writer(); request.u32(fid); request.u32(flags);
+    await this.rpc(TLOPEN, RLOPEN, request);
+  }
+  private async clunk(fid: number) {
+    const request = new Writer(); request.u32(fid);
+    await this.rpc(TCLUNK, RCLUNK, request);
   }
 
   private rpc(type: number, expected: number, writer: Writer, fixedTag?: number): Promise<Reply> {
@@ -110,7 +139,7 @@ export class LegionFs {
         resolve: (reply) => {
           if (reply.type === RLERROR) {
             const errno = new DataView(reply.body.buffer, reply.body.byteOffset).getUint32(0, true);
-            reject(new Error(`9P error ${errno}`));
+            reject(new Error(`9P error ${errno} for request ${type}`));
           } else if (reply.type !== expected) reject(new Error(`unexpected 9P response ${reply.type}, expected ${expected}`));
           else resolve(reply);
         }, reject,
