@@ -2,6 +2,36 @@
 
 ![Legion icon](docs/icon-256.png)
 
+## Go branch
+
+This branch implements Milestones 0–5 in Go, using the Rust implementation below
+as the reference. The Rust crates remain available for protocol fixtures and
+comparison. The executable is `cmd/legion`; production packages are under `internal/`.
+
+```sh
+make go-build joker-worker
+LEGION_JOKER_BIN="$PWD/bin/joker" bin/legion --data-dir ./data
+```
+
+Go 1.26.5 is selected by the Makefile; builds use `CGO_ENABLED=0`. Bun is required
+for Bun functions. The dashboard is at `http://127.0.0.1:8080/dashboard`.
+Set provider credentials in the server environment, `LEGION_API_KEY` for REST
+and `LEGION_NAMESPACE_CAPABILITY` for the independent 9P attach capability.
+
+The Go stack uses go-ai, HashiCorp Raft, bbolt, pure-Go SQLite, go-iroh, hugelgupf/p9,
+wazero/Extism, and supervised Bun/Joker workers. Agent profiles and channel mappings
+are process-local; session event logs are durable. Automatic cross-node function
+scheduling remains a later milestone.
+
+Verification: `make go-verify-m3`, `make go-verify-m4`, and `make go-verify-m5` passed
+on 2026-09-07. The first two build Rust interoperability/WASM fixtures; the last
+uses Go, Joker, Bun and Chromium. See the [roadmap](docs/10-roadmap.md) and
+[ecosystem contracts](docs/14-agent-ecosystem.md) for evidence and limitations.
+
+## Original Rust design
+
+The design description and dependency tables below describe the Rust reference.
+
 > A self-hosted, self-healing durable functions platform with Raft consensus, content-addressed storage, and a 9P namespace — running AI agents and WASM/Bun functions across a LAN-bootstrapped P2P cluster.
 
 Legion is the open, self-hostable equivalent of Cloudflare Agents / Durable Objects, built entirely in Rust. Consider it a learning experience in various ways, informed by my interest in Plan9, general concerns about doing lifecycle management The Right Way<sup>TM</sup>, and wanting something I could run locally across Intel and ARM machines (often very low powered SBCs).

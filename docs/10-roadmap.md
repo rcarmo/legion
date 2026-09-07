@@ -183,8 +183,13 @@ and bounded overload-shedding gates.
 Verified on 2026-09-07 with `make go-check`, `make go-test-channels`,
 `make go-m5-smoke`, and the pinned Joker helper tests. See
 [Agent Ecosystem](14-agent-ecosystem.md#go-verification) for test boundaries and
-the blocked optional OpenCode live check. Re-verification of the earlier
-mixed Rust/Go interoperability gates remains pending.
+the blocked optional OpenCode live check. The earlier gates were re-verified on
+2026-09-07: `make go-verify-m3`, `make go-verify-m4`, and `make go-verify-m5`
+pass, including direct/relay/gossip interoperability, authenticated 9P,
+bidirectional blob transfer, WASM/Bun/Joker execution, OTLP, restic restore,
+systemd packaging and load tests. Rust fixture builds used
+`CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0`; the Go gates used Go 1.26.5
+with `CGO_ENABLED=0`.
 
 ---
 

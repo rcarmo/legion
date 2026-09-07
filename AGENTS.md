@@ -1,6 +1,19 @@
 # Legion — Agent Instructions
 
-Legion is a Rust workspace implementing a self-hosted durable functions platform.
+This branch implements Legion in Go. Rust source is retained as a reference and
+for interoperability fixtures. The Rust-specific layout and conventions below
+apply only when editing those crates.
+
+## Go implementation
+
+- Entry point: `cmd/legion`; packages: `internal/{core,store,raftstore,agent,cluster,namespace,deploy,runtime,ecosystem,telemetry}`.
+- Keep pure contracts in `internal/core`; use the `EventStore` interface above storage implementations.
+- Use the root Makefile: `go-check`, `go-build`, `go-verify-m3`, `go-verify-m4`, `go-verify-m5`.
+- Go 1.26.5 and `CGO_ENABLED=0` are the default build contract. The Joker worker is separately pinned and built with `make joker-worker`.
+- SQLite migrations belong in `internal/store/migrations`.
+- `go-verify-m3` and `go-verify-m4` compile Rust interoperability fixtures into the shared root `target/`; do not create nested targets.
+- Keep credentials out of code and worker environments unless explicitly declared by a function manifest.
+- Preserve both the Rust reference contracts and existing Go API consumers when changing wire formats.
 
 ## Repository Layout
 
