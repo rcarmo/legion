@@ -4,6 +4,7 @@ package joker
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -17,6 +18,9 @@ import (
 )
 
 const Revision = "edd0fe7fff7b2bae3a714a9918502f7dd3b21d5f"
+
+//go:embed namespace.joke
+var namespaceSource []byte
 
 type Runtime struct {
 	Bin    string
@@ -69,11 +73,15 @@ func (r *Runtime) Invoke(ctx context.Context, req legionruntime.Request) (legion
 	if err = os.WriteFile(worker, []byte(workerSource), 0600); err != nil {
 		return legionruntime.Result{}, err
 	}
+	helpers := filepath.Join(dir, "namespace.joke")
+	if err = os.WriteFile(helpers, namespaceSource, 0600); err != nil {
+		return legionruntime.Result{}, err
+	}
 	input, _ := json.Marshal(envelope{req.FunctionName, req.CallID, req.Args, req.Env})
 	input = append(input, '\n')
 	callCtx, cancel := context.WithTimeout(ctx, r.Limits.Timeout)
 	defer cancel()
-	cmd := exec.CommandContext(callCtx, r.Bin, worker, script)
+	cmd := exec.CommandContext(callCtx, r.Bin, worker, script, helpers)
 	cmd.Dir = dir
 	cmd.Env = allowlistedEnv(req.Env, req.FunctionName, req.CallID)
 	cmd.Stdin = bytes.NewReader(input)
@@ -164,6 +172,8 @@ const workerSource = `(require '[joker.json :as json])
 (defn respond [value error]
   (println (json/write-string {"call_id" (get request "call_id") "output" value "error" error})))
 (try
+  (load-file (second *command-line-args*))
+  (in-ns 'user)
   (load-file (first *command-line-args*))
   (respond (apply (resolve (symbol "run")) [(get request "args")]) nil)
   (catch Error e (respond nil (str e))))

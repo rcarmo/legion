@@ -49,14 +49,13 @@ Run strict type checks and package tests with `make js-test`.
 
 Bun functions connect to the same capability-protected `LegionNamespace` through an opt-in local TCP projection:
 
-```toml
-namespace_capability = "replace-me"
-ninep_tcp_addr = "127.0.0.1:5640"
+```sh
+bin/legion --9p-addr 127.0.0.1:5640 --9p-capability replace-me
 ```
 
 Only loopback bind addresses and clients are accepted. Cluster traffic continues over authenticated iroh QUIC. Set `LEGION_NAMESPACE_CAPABILITY` in functions and pass it to `createLegionFs`.
 
-`make bun-ninep-integration-test` starts a prebuilt Legion server and proves version negotiation, capability attach, durable session creation/readback, and wrong-capability denial.
+`make go-m5-smoke` starts an isolated Go server and proves version negotiation, capability attach, file open/read/write/clunk, durable session creation/readback, and wrong-capability denial.
 
 ## Dashboard
 
@@ -67,4 +66,43 @@ Only loopback bind addresses and clients are accepted. Cluster traffic continues
 - cluster identity and peers;
 - interactive workflow graph execution.
 
-The shell is public so it can present an API-key field. Every data request remains protected by the normal API middleware; the key is stored only in browser local storage. `make dashboard-integration-test` verifies the UI against a real server in Chromium.
+The shell is public so it can present an API-key field. Every data request remains protected by the normal API middleware; the key is stored only in browser local storage. `make go-m5-smoke` verifies the UI against a real Go server in Chromium.
+
+## Joker namespace helpers
+
+The pinned Joker worker preloads the `legion` namespace. Helpers use the authenticated
+REST projection of the same namespace; they do not implement a separate 9P client.
+Supply `LEGION_URL` and, for a protected server, `LEGION_API_KEY` explicitly in the
+function's `env` manifest. Server credentials are never inherited automatically.
+
+```clojure
+(defn run [args]
+  {"self" (legion/read-json "/cluster/self")
+   "child" (legion/write-json "/sessions/new" {"model" "openai/gpt-4o-mini"})
+   "result" (legion/invoke "echo" args)})
+```
+
+`legion/read-file` and `legion/write-file` handle raw strings. JSON helpers parse
+responses; HTTP failures become worker errors. The existing worker timeout bounds
+helper calls. `legion/invoke` returns the function result envelope.
+
+## Go verification
+
+Verified on 2026-09-07:
+
+- `make go-check`: formatting, vet and all Go package tests.
+- `make go-test-channels`: real HTTP, SQLite, GoAI, web/Telegram adapters, agent
+  invocation, supervised forks, DAGs, LLM-to-agent tool dispatch and database reopen.
+  Inference and Telegram transport use deterministic test doubles.
+- `make go-m5-smoke`: real Go process, TypeScript REST client, Bun functions in
+  workflow waves, capability-protected Bun 9P and Chromium dashboard navigation.
+- `LEGION_JOKER_TEST_BIN=$PWD/bin/joker make go-check`: pinned Joker worker execution
+  and helper read/write/invoke tests, including wrong-key rejection.
+
+`make go-test-opencode` is an optional live check restricted to model IDs ending
+in `-free`. OpenCode rejected the 2026-09-07 attempt with `MissingSessionID` and
+“OpenCode's free tier can only be used in OpenCode”; this gate has not passed.
+
+Profiles and channel-to-session mappings remain process-local, as in the Rust
+reference. Session logs survive restart. Automatic cluster-wide function scheduling
+is outside Milestone 5.

@@ -1,0 +1,33 @@
+(ns legion
+  (:require [joker.http :as http]
+            [joker.json :as json]
+            [joker.os :as os]
+            [joker.string :as string]))
+
+;; The REST projection addresses the same namespace as 9P. Credentials must be
+;; explicitly supplied in the function manifest; worker environments are filtered.
+(defn request [method path body]
+  (let [base (os/get-env "LEGION_URL")
+        key (os/get-env "LEGION_API_KEY")]
+    (when (or (nil? base) (= base ""))
+      (throw (ex-info "LEGION_URL is required for namespace helpers" {})))
+    (when-not (re-matches #"/[A-Za-z0-9_./-]*" path)
+      (throw (ex-info "invalid namespace request path" {})))
+    (let [headers (if (and key (not= key ""))
+                    {"content-type" "application/json" "authorization" (str "Bearer " key)}
+                    {"content-type" "application/json"})
+          response (http/send (cond-> {:url (str (string/replace base #"/+$" "") path)
+                                       :method method :headers headers}
+                                (not (nil? body)) (assoc :body body)))]
+      (when (>= (:status response) 300)
+        (throw (ex-info (str "Legion HTTP " (:status response) ": " (:body response)) {})))
+      (:body response))))
+
+(defn read-file [path] (request :get (str "/namespace" path) nil))
+(defn write-file [path value] (request :put (str "/namespace" path) value))
+(defn read-json [path] (json/read-string (read-file path)))
+(defn write-json [path value] (json/read-string (write-file path (json/write-string value))))
+(defn invoke [name args]
+  (when-not (re-matches #"[a-z0-9][a-z0-9-]*" name)
+    (throw (ex-info "invalid function name" {})))
+  (json/read-string (request :post (str "/functions/" name "/invoke") (json/write-string args))))

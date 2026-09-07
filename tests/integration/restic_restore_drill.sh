@@ -68,10 +68,10 @@ rm -f "$LEGION_STATE_DIR/raft/state.db" "$LEGION_STATE_DIR/raft/state.db-wal" "$
 start_node "$LEGION_STATE_DIR" "$RESTORED_RAFT" "$RESTORED_API" "$TMP/restored.log"
 for _ in $(seq 1 100); do
   status=$(curl -sf -H "Authorization: Bearer $KEY" "http://$RESTORED_API/sessions/$session" 2>/dev/null || true)
-  if jq -e '.status == "idle"' <<<"$status" >/dev/null 2>&1; then break; fi
+  if jq -e '.status.status == "idle"' <<<"$status" >/dev/null 2>&1; then break; fi
   sleep .1
 done
-curl -sf -H "Authorization: Bearer $KEY" "http://$RESTORED_API/sessions/$session" | jq -e '.status == "idle"' >/dev/null
+curl -sf -H "Authorization: Bearer $KEY" "http://$RESTORED_API/sessions/$session" | jq -e '.status.status == "idle"' >/dev/null
 LEGION_URL="http://$RESTORED_API" LEGION_API_KEY="$KEY" "$LEGION" call restored-bun '{"marker":"real-go-state"}' | jq -e '.output.restored == "real-go-state"' >/dev/null
 [[ -s "$LEGION_STATE_DIR/raft/state.db" ]]
 echo "Restic clean-node Go restore drill passed: Raft session rebuilt, CAS function invoked, checksums verified"

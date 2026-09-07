@@ -129,7 +129,7 @@ func (a REST) sessions(w http.ResponseWriter, r *http.Request) {
 			}
 			err = json.Unmarshal(b, &created)
 			if err == nil {
-				b, err = json.Marshal(map[string]any{"id": created.RunID, "status": "idle"})
+				b, err = json.Marshal(map[string]any{"id": created.RunID, "run_id": created.RunID, "status": "idle"})
 			}
 		}
 		writeHTTP(w, b, err)

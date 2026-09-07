@@ -172,13 +172,19 @@ and bounded overload-shedding gates.
 
 **Goal**: Multi-agent workflows, agent-as-tool composition, picoclaw channel adapters.
 
-- [ ] Agents callable as tools (`AgentProfile` registration exposes `agent.<name>` through the shared `ToolRegistry`)
-- [ ] picoclaw-compatible channel adapters (Telegram long polling, framework-neutral web chat, durable conversation routing)
-- [ ] Sub-agent sessions (verified parent sequence, durable fork, assignment injection, supervised child result/status)
-- [ ] Workflow graph execution (validated DAG, dependency outputs, concurrent deterministic waves, cycle rejection)
-- [ ] `@legion/client` npm package for Bun/Node.js (Node-targeted ESM plus declarations, authenticated REST contracts)
-- [ ] Dashboard UI (embedded session list/detail/log plus agents, functions, cluster and workflow views)
-- [ ] 9P client compatibility: retain the TypeScript adapter for external Bun/Node consumers and add Joker namespace helpers for bundled functions
+- [x] Agents callable as tools (`AgentProfile` registration exposes `agent.<name>` through the shared `ToolRegistry`)
+- [x] picoclaw-compatible channel adapters (Telegram long polling, framework-neutral web chat, durable conversation routing)
+- [x] Sub-agent sessions (verified parent sequence, durable fork, assignment injection, supervised child result/status)
+- [x] Workflow graph execution (validated DAG, dependency outputs, concurrent deterministic waves, cycle rejection)
+- [x] `@legion/client` npm package for Bun/Node.js (Node-targeted ESM plus declarations, authenticated REST contracts)
+- [x] Dashboard UI (embedded session list/detail/log plus agents, functions, cluster and workflow views)
+- [x] 9P client compatibility: retain the native Bun TypeScript 9P adapter and the Bun/Node REST client; add Joker namespace helpers for bundled functions through the authenticated REST projection
+
+Verified on 2026-09-07 with `make go-check`, `make go-test-channels`,
+`make go-m5-smoke`, and the pinned Joker helper tests. See
+[Agent Ecosystem](14-agent-ecosystem.md#go-verification) for test boundaries and
+the blocked optional OpenCode live check. Re-verification of the earlier
+mixed Rust/Go interoperability gates remains pending.
 
 ---
 

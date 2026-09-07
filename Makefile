@@ -64,6 +64,11 @@ go-test-channels:
 go-m5-smoke: go-build js-test
 	bash ./tests/integration/go_m5_smoke.sh
 
+.PHONY: go-verify-m5
+go-verify-m5: joker-worker
+	LEGION_JOKER_TEST_BIN="$(JOKER_BIN)" $(MAKE) --no-print-directory go-check
+	$(MAKE) --no-print-directory go-test-channels go-m5-smoke
+
 go-test: preflight
 	$(GO_ENV) $(GO) test ./...
 
