@@ -6,11 +6,19 @@ import (
 	"strings"
 
 	goai "github.com/rcarmo/go-ai"
+	_ "github.com/rcarmo/go-ai/inference/provider/anthropic"
+	_ "github.com/rcarmo/go-ai/inference/provider/google"
+	_ "github.com/rcarmo/go-ai/inference/provider/openai"
+	_ "github.com/rcarmo/go-ai/inference/provider/openairesponses"
 )
 
 type Inference interface {
 	Stream(context.Context, string, *goai.Context, *goai.StreamOptions) (<-chan goai.Event, error)
 }
+
+// go-ai keeps its catalogue and wire protocols opt-in. Register both before
+// resolving configured models; faux-only tests do not exercise this setup.
+func init() { goai.RegisterBuiltinModels() }
 
 type GoAI struct{}
 

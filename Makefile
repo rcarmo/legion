@@ -54,7 +54,13 @@ go-test-ecosystem:
 go-test-ecosystem-api:
 	$(GO_ENV) $(GO) test ./internal/namespace ./cmd/legion -run 'Test(EcosystemREST|DashboardAPIContracts)' -count=1
 
-.PHONY: go-m5-smoke
+.PHONY: go-test-opencode go-test-channels go-m5-smoke
+go-test-opencode:
+	LEGION_OPENCODE_INTEGRATION=1 $(GO_ENV) $(GO) test ./internal/namespace -run TestM5OpenCodeFreeIntegration -count=1 -v -timeout 180s
+
+go-test-channels:
+	LEGION_M5_INTEGRATION=1 $(GO_ENV) $(GO) test ./internal/namespace -run TestM5ChannelAgentIntegration -count=1 -v
+
 go-m5-smoke: go-build js-test
 	bash ./tests/integration/go_m5_smoke.sh
 

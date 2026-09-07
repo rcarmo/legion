@@ -183,6 +183,20 @@ func (a REST) session(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		b, err := a.Namespace.WritePath(r, p, body)
+		if err == nil && strings.HasSuffix(r.URL.Path, "/messages") {
+			var result struct {
+				Seq   core.SeqNum    `json:"seq"`
+				Event core.TurnEvent `json:"event"`
+			}
+			err = json.Unmarshal(b, &result)
+			if err == nil {
+				var payload struct {
+					Content string `json:"content"`
+				}
+				_ = json.Unmarshal(result.Event.Payload, &payload)
+				b, err = json.Marshal(map[string]any{"id": r.PathValue("id"), "seq": result.Seq, "response": payload.Content, "tokens_in": result.Event.TokensIn, "tokens_out": result.Event.TokensOut, "wall_ms": result.Event.WallMS})
+			}
+		}
 		writeHTTP(w, b, err)
 	} else {
 		b, err := a.Namespace.ReadPath(r, p)
