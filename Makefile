@@ -1,3 +1,8 @@
+# Capture inherited temporary-directory settings before project recipes override them.
+ifndef WORKSPACE_INHERITED_TMP
+WORKSPACE_INHERITED_TMP := $(or $(strip $(TMPDIR)),$(strip $(TEMP)),/tmp)
+endif
+export WORKSPACE_INHERITED_TMP
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
@@ -314,3 +319,36 @@ go-verify-m4: preflight go-fmt-check
 	$(MAKE) --no-print-directory go-systemd-package-test
 	$(MAKE) --no-print-directory go-load-test
 	@$(MAKE) --no-print-directory postflight
+
+# Project cache/temp policy (5 October 2026): NEVER use ad-hoc paths.
+# Use /workspace/tmp/legion/ locally; a project-named CI/system-temp fallback elsewhere.
+# Legacy targets/tool defaults require migration before use; these variables alone
+# do not redirect explicit paths. Preserve durable data and active artifacts.
+# Portable base: explicit override > CI runner temp > usable local workspace > system temp.
+# Override WORKSPACE_LOCAL_TMP only to probe local availability; never use an ad-hoc project path.
+WORKSPACE_LOCAL_TMP ?= /workspace/tmp
+ifeq ($(strip $(WORKSPACE_TMP_BASE)),)
+ifneq ($(filter-out 0 false FALSE,$(strip $(CI))),)
+WORKSPACE_TMP_BASE := $(or $(strip $(RUNNER_TEMP)),$(WORKSPACE_INHERITED_TMP))
+else
+WORKSPACE_LOCAL_TMP_USABLE := $(shell test -d "$(WORKSPACE_LOCAL_TMP)" && test -w "$(WORKSPACE_LOCAL_TMP)" && test -x "$(WORKSPACE_LOCAL_TMP)" && printf yes)
+ifeq ($(WORKSPACE_LOCAL_TMP_USABLE),yes)
+WORKSPACE_TMP_BASE := $(WORKSPACE_LOCAL_TMP)
+else
+WORKSPACE_TMP_BASE := $(or $(strip $(RUNNER_TEMP)),$(WORKSPACE_INHERITED_TMP))
+endif
+endif
+endif
+WORKSPACE_PROJECT_TMP := $(patsubst %/,%,$(WORKSPACE_TMP_BASE))/legion/worktrees/legion-go
+WORKSPACE_CACHE_DIR := $(WORKSPACE_PROJECT_TMP)/cache
+WORKSPACE_BUILD_DIR := $(WORKSPACE_PROJECT_TMP)/build
+WORKSPACE_TEST_DIR := $(WORKSPACE_PROJECT_TMP)/tests
+WORKSPACE_LOG_DIR := $(WORKSPACE_PROJECT_TMP)/logs
+WORKSPACE_RUN_DIR := $(WORKSPACE_PROJECT_TMP)/runs
+
+.PHONY: workspace-prepare workspace-paths
+workspace-prepare:
+	@mkdir -p "$(WORKSPACE_CACHE_DIR)" "$(WORKSPACE_BUILD_DIR)" "$(WORKSPACE_TEST_DIR)" "$(WORKSPACE_LOG_DIR)" "$(WORKSPACE_RUN_DIR)"
+
+workspace-paths:
+	@printf '%s\n' "$(WORKSPACE_PROJECT_TMP)" "$(WORKSPACE_CACHE_DIR)" "$(WORKSPACE_BUILD_DIR)" "$(WORKSPACE_TEST_DIR)" "$(WORKSPACE_LOG_DIR)" "$(WORKSPACE_RUN_DIR)"
