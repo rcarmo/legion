@@ -95,3 +95,21 @@ Full design rationale in `docs/`. Key external repositories:
 - hiqlite: https://github.com/sebadob/hiqlite (Raft + SQLite)
 - iroh: https://github.com/n0-computer/iroh (P2P transport)
 - jetstream: https://github.com/sevki/jetstream (9P over QUIC)
+
+## Project cache and temporary-file policy (5 October 2026)
+
+- Reproducible build caches and temporary files MUST use `/workspace/tmp/legion/` locally. NEVER create ad-hoc paths or unscoped temporary files. In CI/CD or when `/workspace/tmp` is absent/unwritable, use a generic temporary base with the same `legion/` suffix.
+- Makefile base selection: explicit `WORKSPACE_TMP_BASE` first; otherwise CI uses `RUNNER_TEMP`, inherited `TMPDIR`/`TEMP`, or `/tmp`. Outside CI, use writable `/workspace/tmp` if present, otherwise that generic fallback. CI unset/empty/0/false means local mode. Inherited temporary settings are captured before project overrides. An override selects a base, never replaces the project suffix. No directory is created merely by parsing Make.
+- Inspect `make workspace-paths`; `make workspace-prepare` creates only the selected project layout. Explicit overrides must be writable and belong to the intended runner/workspace; keep persistent data elsewhere.
+- Use documented `cache/`, `build/`, `tests/`, `logs/` and `runs/` subdirectories. Unique run folders belong inside these directories. Run `make workspace-prepare` to create the declared layout.
+- Before running a build/test tool, configure its temporary and cache paths to this layout (for example TMPDIR, Go GOCACHE/GOMODCACHE/GOTMPDIR, Cargo target output, Bun install cache or Gradle user home). TMPDIR alone does not override explicit paths or every cache. The Makefile's WORKSPACE_* variables declare the layout; older targets and scripts must be checked and migrated before use.
+- This rule supersedes older scratch/cache examples in these instructions. Preserve published output contracts until their consumers are updated and verified. Keep source, curated checkpoints, credentials, persistent service data and durable deliverables outside disposable storage.
+- Do not delete or move existing artifacts during adoption, especially while a process or another worktree uses them. Cleanup must be restricted to this project's disposable paths.
+
+## Profiling and tuning policy
+
+- Profile and tune during pre-release testing, using representative workloads. Routine development tests run without profiling; do not attach CPU, heap, allocation or trace capture to every test run.
+- During pre-release analysis, compare equivalent workloads, fix measured bottlenecks, and re-measure without weakening correctness or test coverage.
+- After analysis, retain concise findings, commands, source/toolchain identities and measured before/after results. Delete raw profiling captures and their disposable analysis binaries once analysis is complete; do not retain raw captures indefinitely or treat them as permanent checkpoints.
+- Keep profiling data in the project's documented disposable workspace paths, with the existing portable CI/absent-workspace fallback. Restrict cleanup to owned files and wait for processes using them to finish. Preserve source, user data and non-profiling evidence.
+- This policy supersedes older instructions requiring profiling on every development test or indefinite retention of raw profiling data. If existing Make targets or harnesses still force profiling for ordinary tests, correct that tooling before using those paths for routine development; this documentation change alone does not change runtime behaviour.
